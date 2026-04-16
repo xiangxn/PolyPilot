@@ -65,9 +65,10 @@ func (e *Engine) Start(ctx context.Context) {
 					return
 				}
 				switch ev.Type {
-				case core.EventMarket:
+				case core.EventMarket, core.EventOrderBook:
 					e.marketEvents.Add(1)
 					e.handleMarketUpdate(ev)
+
 				case core.EventExecution:
 					data, ok := ev.Data.(core.ExecutionEvent)
 					if !ok {
@@ -113,6 +114,10 @@ func (e *Engine) Close() {
 	if e.Bus != nil {
 		e.Bus.Close()
 	}
+}
+
+func (e *Engine) handleOrderBookUpdate(ev core.Event) {
+
 }
 
 func (e *Engine) handleMarketUpdate(ev core.Event) {

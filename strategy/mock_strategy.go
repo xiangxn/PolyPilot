@@ -3,6 +3,8 @@ package strategy
 import (
 	"polypilot/core"
 	"polypilot/runtime"
+
+	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
 type MockStrategy struct {
@@ -14,16 +16,16 @@ func (s *MockStrategy) Init(bus *core.EventBus) {
 }
 
 func (s *MockStrategy) OnUpdate(e core.Event, m runtime.Observation) []runtime.OrderIntent {
-	if e.Type != core.EventMarket {
+	if e.Type != core.EventOrderBook {
 		return nil
 	}
 
-	market := e.Data.(core.MarketEvent)
+	market := e.Data.(sdk.OrderBook)
 
 	return []runtime.OrderIntent{
 		{
-			MarketID: market.MarketID,
-			TokenID:  market.TokenID,
+			MarketID: market.Market,
+			TokenID:  market.AssetId,
 			Price:    0.4,
 			Side:     core.SideBuy,
 			Size:     5,

@@ -6,7 +6,9 @@ const (
 )
 
 const (
-	EventMarket    EventType = "MARKET"
+	// 创建、更新、结束、结算
+	EventMarket EventType = "MARKET"
+	// 订单薄更新
 	EventOrderBook EventType = "ORDERBOOK"
 	EventSignal    EventType = "SIGNAL"
 	EventOrder     EventType = "ORDER"

@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/tidwall/gjson v1.18.0
-	github.com/xiangxn/go-polymarket-sdk v0.2.2
+	github.com/xiangxn/go-polymarket-sdk v0.2.3
 	modernc.org/sqlite v1.48.2
 )
 

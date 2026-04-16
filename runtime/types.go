@@ -14,6 +14,7 @@ type Observation struct {
 	Probability float64
 	Price       float64
 	At          int64
+	Data        any
 }
 
 type Feed interface {

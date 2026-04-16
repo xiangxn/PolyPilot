@@ -1,0 +1,13 @@
+flowchart TD
+    A[Feed] -->|发布 ORDERBOOK| B[EventBus]
+    B --> C[runtime.Engine 事件循环]
+    C -->|只处理 MARKET/EXECUTION| D{匹配到 MARKET?}
+    D -- 否 --> X[ORDERBOOK 被忽略]
+    D -- 是 --> E[Probability.OnUpdate]
+    E --> F[Strategy.OnUpdate]
+    F --> G[Risk.Check]
+    G --> H[Executor.Execute]
+    H -->|发布 EXECUTION| B
+    B --> C
+    C --> I[State/Store 更新]
+    I --> J[等待下一次市场事件再进入 Strategy]

@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"os"
 	"polypilot/core"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/tidwall/gjson"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	"github.com/xiangxn/go-polymarket-sdk/utils"
 )
@@ -23,13 +20,17 @@ const (
 )
 
 type SlugMarket struct {
-	Slug     string
-	MarketID string
-	TokenIDs []string
-	Prices   []float64
-	EndDate  int64
-	TickSize float64
-	NegRisk  bool
+	Slug             string
+	MarketID         string
+	TokenIDs         []string
+	Prices           []float64
+	EndDate          int64
+	ResolutionSource string
+	TickSize         float64
+	NegRisk          bool
+	StartDate        int64
+	Closed           bool
+	Outcomes         []string
 }
 
 type PolymarketSlugFeed struct {
@@ -42,10 +43,6 @@ type PolymarketSlugFeed struct {
 
 	SlugPrefix    string
 	WindowMinutes int
-
-	mu          sync.Mutex
-	currentSlug string
-	currentEnd  time.Time
 }
 
 func (f *PolymarketSlugFeed) Init(bus *core.EventBus) {
@@ -72,7 +69,7 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 
 	go func() {
 		for {
-			slug := f.activeSlug(time.Now())
+			slug := f.slugFor(time.Now())
 			market, err := f.FetchMarketBySlug(slug)
 			if err != nil {
 				return
@@ -116,18 +113,26 @@ func (f *PolymarketSlugFeed) FetchMarketBySlug(slug string) (*SlugMarket, error)
 	}
 
 	marketID := result.Get("conditionId").String()
-	tokenIDs := parseStringArray(result.Get("clobTokenIds"))
+	tokenIDs := utils.GetStringArray(result, "clobTokenIds")
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("no clob token ids in market slug=%s", slug)
 	}
 
-	prices := parseFloatArray(result.Get("outcomePrices"))
+	prices := utils.GetFloatArray(result, "outcomePrices")
 
 	endDate, err := utils.ToTimestamp(result.Get("endDate").String())
 	if err != nil {
 		return nil, fmt.Errorf("invalid market endDate slug=%s: %w", slug, err)
 	}
 
+	startDate, err := utils.ToTimestamp(result.Get("startDate").String())
+	if err != nil {
+		return nil, fmt.Errorf("invalid market startDate slug=%s: %w", slug, err)
+	}
+
+	outcomes := utils.GetStringArray(result, "outcomes")
+
+	resolutionSource := result.Get("resolutionSource").String()
 	tickSize := result.Get("orderPriceMinTickSize").Float()
 	negRisk := result.Get("negRisk").Bool()
 	feesEnabled := result.Get("feesEnabled").Bool()
@@ -142,24 +147,18 @@ func (f *PolymarketSlugFeed) FetchMarketBySlug(slug string) (*SlugMarket, error)
 	}
 
 	return &SlugMarket{
-		Slug:     slug,
-		MarketID: marketID,
-		TokenIDs: tokenIDs,
-		Prices:   prices,
-		EndDate:  endDate,
-		TickSize: tickSize,
-		NegRisk:  negRisk,
+		Slug:             slug,
+		MarketID:         marketID,
+		TokenIDs:         tokenIDs,
+		Prices:           prices,
+		EndDate:          endDate,
+		TickSize:         tickSize,
+		NegRisk:          negRisk,
+		ResolutionSource: resolutionSource,
+		StartDate:        startDate,
+		Closed:           result.Get("closed").Bool(),
+		Outcomes:         outcomes,
 	}, nil
-}
-
-func (f *PolymarketSlugFeed) activeSlug(now time.Time) string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	if f.currentSlug == "" || (!f.currentEnd.IsZero() && !now.Before(f.currentEnd)) {
-		f.currentSlug = f.slugFor(now)
-	}
-	return f.currentSlug
 }
 
 func (f *PolymarketSlugFeed) slugFor(now time.Time) string {
@@ -191,78 +190,4 @@ func (f *PolymarketSlugFeed) resolveSignerKey() string {
 		return strings.TrimPrefix(key, "0x")
 	}
 	return defaultReadonlyPrivKey
-}
-
-func parseStringArray(v gjson.Result) []string {
-	if !v.Exists() {
-		return nil
-	}
-
-	s := strings.TrimSpace(v.String())
-	if s != "" {
-		parsed := gjson.Parse(s)
-		if parsed.IsArray() {
-			items := parsed.Array()
-			res := make([]string, 0, len(items))
-			for _, item := range items {
-				if t := item.String(); t != "" {
-					res = append(res, t)
-				}
-			}
-			return res
-		}
-	}
-
-	arr := v.Array()
-	if len(arr) > 0 {
-		res := make([]string, 0, len(arr))
-		for _, item := range arr {
-			if item.IsArray() {
-				nested := item.Array()
-				for _, n := range nested {
-					if t := n.String(); t != "" {
-						res = append(res, t)
-					}
-				}
-				continue
-			}
-			if t := strings.TrimSpace(item.String()); t != "" {
-				res = append(res, t)
-			}
-		}
-		if len(res) > 0 {
-			return res
-		}
-	}
-
-	if s == "" {
-		return nil
-	}
-	return []string{s}
-}
-
-func parseFloatArray(v gjson.Result) []float64 {
-	items := parseStringArray(v)
-	if len(items) == 0 {
-		return nil
-	}
-	res := make([]float64, 0, len(items))
-	for _, item := range items {
-		n, err := strconv.ParseFloat(item, 64)
-		if err == nil {
-			res = append(res, n)
-		}
-	}
-	return res
-}
-
-func parseEndTime(endDate string) (time.Time, error) {
-	endDate = strings.TrimSpace(endDate)
-	if endDate == "" {
-		return time.Time{}, fmt.Errorf("empty endDate")
-	}
-	if t, err := time.Parse(time.RFC3339, endDate); err == nil {
-		return t, nil
-	}
-	return time.Parse(time.RFC3339Nano, endDate)
 }

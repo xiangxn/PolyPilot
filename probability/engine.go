@@ -29,6 +29,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		Probability: e.estimate(),
 		Price:       e.LastPrice,
 		At:          data.Timestamp,
+		Data:        data,
 	}, true
 }
 
