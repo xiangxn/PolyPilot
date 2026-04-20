@@ -80,7 +80,7 @@ func (e *Engine) Start(ctx context.Context) {
 						e.publishRisk("invalid execution event payload")
 						continue
 					}
-					if e.ExecutionStore != nil {
+					if data.OrderID != "" && e.ExecutionStore != nil {
 						if err := e.ExecutionStore.AppendExecution(data); err != nil {
 							e.publishRisk(fmt.Sprintf("persist execution failed order=%s reason=%s", data.OrderID, err.Error()))
 						}
@@ -200,7 +200,10 @@ func (e *Engine) handleExecutionEvent(data core.ExecutionEvent, count bool) {
 	}
 
 	if data.OrderID == "" {
-		e.publishRisk("execution event missing order id")
+		if data.Status == core.ExecutionStatusRejected && data.Reason != "" {
+			e.executionRejected.Add(1)
+			e.publishRisk(fmt.Sprintf("execution rejected reason=%s", data.Reason))
+		}
 		return
 	}
 

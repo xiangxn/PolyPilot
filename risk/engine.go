@@ -23,6 +23,23 @@ func (r *Engine) Check(orders []runtime.OrderIntent, s state.Snapshot) error {
 	sellRequiredByToken := make(map[string]float64)
 
 	for _, o := range orders {
+		action := o.Action
+		if action == "" {
+			action = runtime.OrderIntentActionPlace
+		}
+
+		switch action {
+		case runtime.OrderIntentActionCancel:
+			if o.OrderID == "" {
+				return errors.New("invalid cancel order id")
+			}
+			continue
+		case runtime.OrderIntentActionPlace:
+			// continue below
+		default:
+			return errors.New("invalid order action")
+		}
+
 		if o.MarketID == "" {
 			return errors.New("invalid market id")
 		}

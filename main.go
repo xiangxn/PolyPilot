@@ -39,9 +39,12 @@ func main() {
 	}
 
 	engine := &runtime.Engine{
-		State:      state.NewState(balanceSyncCfg),
-		Risk:       &risk.Engine{},
-		Exec:       &execution.Executor{},
+		State: state.NewState(balanceSyncCfg),
+		Risk:  &risk.Engine{},
+		Exec: &execution.Executor{
+			Config:    &sdk.Config{Polymarket: cfg.Polymarket},
+			SignerKey: cfg.SignerKey,
+		},
 		SQLitePath: cfg.SQLitePath,
 		Feeds: []runtime.Feed{&market.PolymarketSlugFeed{
 			SlugPrefix:    "btc-updown-5m",

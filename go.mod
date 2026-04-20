@@ -4,10 +4,13 @@ go 1.25.5
 
 require (
 	github.com/ethereum/go-ethereum v1.16.1
+	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/joho/godotenv v1.5.1
 	github.com/polymarket/go-order-utils v1.22.6
+	github.com/spf13/viper v1.20.1
 	github.com/tidwall/gjson v1.18.0
-	github.com/xiangxn/go-polymarket-sdk v0.2.4
+	github.com/xiangxn/go-polymarket-sdk v0.3.0
+	golang.org/x/term v0.36.0
 	modernc.org/sqlite v1.48.2
 )
 
@@ -25,7 +28,6 @@ require (
 	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
@@ -40,7 +42,6 @@ require (
 	github.com/spf13/afero v1.12.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
-	github.com/spf13/viper v1.20.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe // indirect
 	github.com/tidwall/match v1.1.1 // indirect
@@ -53,7 +54,6 @@ require (
 	golang.org/x/net v0.45.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/term v0.36.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.70.0 // indirect

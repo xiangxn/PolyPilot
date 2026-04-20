@@ -108,10 +108,23 @@ type Context struct {
 	TimeLeft    time.Duration
 }
 
+type OrderIntentAction string
+
+const (
+	OrderIntentActionPlace  OrderIntentAction = "PLACE"
+	OrderIntentActionCancel OrderIntentAction = "CANCEL"
+)
+
 type OrderIntent struct {
+	Action OrderIntentAction
+
+	// PLACE 必填
 	MarketID string
 	TokenID  string
 	Price    float64
 	Side     model.Side
 	Size     float64
+
+	// CANCEL 必填（交易所订单 ID）
+	OrderID string
 }
