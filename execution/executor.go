@@ -378,10 +378,7 @@ func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
 	var out []core.ExecutionEvent
 	e.mu.Lock()
 	for _, f := range fills {
-		tracked, ok := e.tracked[f.orderID]
-		if !ok {
-			continue
-		}
+		tracked := e.getOrCreateTracked(f.orderID)
 		if tracked.Finalized {
 			continue
 		}

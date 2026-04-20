@@ -294,6 +294,12 @@ func TestUpsertOrderRecord_Lifecycle_SellAndNegativeFill(t *testing.T) {
 func TestSaveStateSnapshot(t *testing.T) {
 	stateStore := store.NewMemoryStateStore()
 	s := state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{})
+	s.Restore(state.Snapshot{
+		Position: state.Position{Tokens: map[string]state.TokenPosition{
+			"token-hold": {Available: 3, Reserved: 1},
+		}},
+		Balance: state.Balance{Available: 100, Reserved: 0},
+	}, nil)
 	if err := s.ReserveOrder("ord-save", "market-1", "token-1", model.BUY, 0.5, 10); err != nil {
 		t.Fatalf("reserve failed: %v", err)
 	}
@@ -308,6 +314,10 @@ func TestSaveStateSnapshot(t *testing.T) {
 	}
 	if !almostEqual(rec.Available, 95) || !almostEqual(rec.Reserved, 5) {
 		t.Fatalf("unexpected snapshot record: %+v", rec)
+	}
+	tp, ok := rec.Tokens["token-hold"]
+	if !ok || !almostEqual(tp.Available, 3) || !almostEqual(tp.Reserved, 1) {
+		t.Fatalf("unexpected snapshot token record: %+v", rec.Tokens)
 	}
 	if rec.At != now.UnixNano() {
 		t.Fatalf("unexpected snapshot timestamp: %+v", rec)
@@ -401,6 +411,85 @@ func TestRestoreFromStore_ExecutionLogPath(t *testing.T) {
 	tp := snap.Position.Tokens["token-1"]
 	if !almostEqual(tp.Available, 3) {
 		t.Fatalf("unexpected token position after execution replay: %+v", tp)
+	}
+}
+
+func TestRestoreFromStore_NoSnapshotFallsBackToExecutionLog(t *testing.T) {
+	orderStore := store.NewMemoryOrderStore()
+	stateStore := store.NewMemoryStateStore()
+	execStore := store.NewMemoryExecutionStore()
+	now := time.Now()
+
+	_ = execStore.AppendExecution(core.ExecutionEvent{
+		OrderID:       "ord-fallback-1",
+		MarketID:      "market-1",
+		TokenID:       "token-1",
+		Price:         0.2,
+		Side:          model.BUY,
+		RequestedSize: 10,
+		Status:        core.ExecutionStatusAccepted,
+		At:            now,
+	})
+	_ = execStore.AppendExecution(core.ExecutionEvent{
+		OrderID:    "ord-fallback-1",
+		MarketID:   "market-1",
+		TokenID:    "token-1",
+		Price:      0.2,
+		Side:       model.BUY,
+		FilledSize: 3,
+		Status:     core.ExecutionStatusPartiallyFilled,
+		At:         now.Add(time.Millisecond),
+	})
+
+	e := &Engine{
+		Bus:            core.NewEventBus(),
+		State:          state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{}),
+		OrderStore:     orderStore,
+		StateStore:     stateStore,
+		ExecutionStore: execStore,
+	}
+	e.initOrderTracking()
+	e.restoreFromStore()
+
+	snap := e.State.Snapshot()
+	if !almostEqual(snap.Balance.Available, 98) || !almostEqual(snap.Balance.Reserved, 1.4) {
+		t.Fatalf("unexpected fallback replay state: %+v", snap.Balance)
+	}
+	tp := snap.Position.Tokens["token-1"]
+	if !almostEqual(tp.Available, 3) {
+		t.Fatalf("unexpected token position in fallback replay: %+v", tp)
+	}
+}
+
+func TestRestoreFromStore_RestoresSnapshotTokenPositions(t *testing.T) {
+	orderStore := store.NewMemoryOrderStore()
+	stateStore := store.NewMemoryStateStore()
+	_ = stateStore.SaveSnapshot(store.SnapshotRecord{
+		Available:  50,
+		Reserved:   0,
+		MinBalance: 5,
+		Tokens: map[string]store.TokenPositionRecord{
+			"token-a": {Available: 7, Reserved: 2},
+		},
+		At: time.Now().UnixNano(),
+	})
+
+	e := &Engine{
+		Bus:        core.NewEventBus(),
+		State:      state.NewStateWithInitialAvailable(0, 0, state.BalanceSyncConfig{}),
+		OrderStore: orderStore,
+		StateStore: stateStore,
+	}
+	e.initOrderTracking()
+	e.restoreFromStore()
+
+	snap := e.State.Snapshot()
+	if !almostEqual(snap.Balance.Available, 50) || !almostEqual(snap.Balance.MinBalance, 5) {
+		t.Fatalf("unexpected restored snapshot balance: %+v", snap.Balance)
+	}
+	tp := snap.Position.Tokens["token-a"]
+	if !almostEqual(tp.Available, 7) || !almostEqual(tp.Reserved, 2) {
+		t.Fatalf("unexpected restored snapshot token position: %+v", tp)
 	}
 }
 

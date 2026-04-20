@@ -196,6 +196,38 @@ func TestOnTradeEvent_FailedEmitsRejectedWithOrderID(t *testing.T) {
 	}
 }
 
+func TestOnTradeEvent_UnknownOrderStillPublishesFill(t *testing.T) {
+	bus := core.NewEventBus()
+	ch := bus.Subscribe()
+	exec := &Executor{Bus: bus}
+
+	exec.onTradeEvent(&sdkmodel.WSTrade{
+		Id:           "tr-unknown-1",
+		Market:       "m1",
+		AssetId:      "tk-unknown",
+		Side:         "BUY",
+		Price:        0.41,
+		Size:         2,
+		Status:       "MINED",
+		TakerOrderId: "ord-unknown-1",
+		Timestamp:    time.Now().Unix(),
+	})
+
+	fill := mustRecvExecutionEvent(t, ch)
+	if fill.Status != core.ExecutionStatusPartiallyFilled {
+		t.Fatalf("unexpected status: %s", fill.Status)
+	}
+	if fill.OrderID != "ord-unknown-1" {
+		t.Fatalf("unexpected order id: %s", fill.OrderID)
+	}
+	if fill.MarketID != "m1" || fill.TokenID != "tk-unknown" {
+		t.Fatalf("unexpected market/token: %+v", fill)
+	}
+	if fill.Side != model.BUY || fill.Price != 0.41 || fill.FilledSize != 2 {
+		t.Fatalf("unexpected fill fields: %+v", fill)
+	}
+}
+
 func mustRecvExecutionEvent(t *testing.T, ch <-chan core.Event) core.ExecutionEvent {
 	t.Helper()
 	select {

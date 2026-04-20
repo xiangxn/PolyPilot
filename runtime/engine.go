@@ -391,54 +391,66 @@ func (e *Engine) initStores() bool {
 }
 
 func (e *Engine) restoreFromStore() {
+	restoredFromSnapshot := false
+
 	if e.StateStore != nil && e.OrderStore != nil {
 		snapshotRec, ok, err := e.StateStore.LoadLatestSnapshot()
 		if err != nil {
 			e.publishRisk(fmt.Sprintf("load snapshot failed reason=%s", err.Error()))
 			return
 		}
-		if !ok {
-			return
-		}
-
-		openOrders, err := e.OrderStore.ListOpenOrders()
-		if err != nil {
-			e.publishRisk(fmt.Sprintf("load open orders failed reason=%s", err.Error()))
-			return
-		}
-
-		reservations := make([]state.ReservationSnapshot, 0, len(openOrders))
-		for _, order := range openOrders {
-			if order.RemainingSize <= 0 {
-				continue
+		if ok {
+			openOrders, err := e.OrderStore.ListOpenOrders()
+			if err != nil {
+				e.publishRisk(fmt.Sprintf("load open orders failed reason=%s", err.Error()))
+				return
 			}
-			reserved := order.Reserved
-			if reserved <= 0 {
-				reserved = requiredReservedForOrder(order.Side, order.Price, order.RemainingSize)
-			}
-			if reserved <= 0 {
-				continue
-			}
-			reservations = append(reservations, state.ReservationSnapshot{
-				OrderID:       order.OrderID,
-				MarketID:      order.MarketID,
-				TokenID:       order.TokenID,
-				Side:          order.Side,
-				Price:         order.Price,
-				RemainingSize: order.RemainingSize,
-				Reserved:      reserved,
-			})
-		}
 
-		e.State.Restore(state.Snapshot{
-			Position: state.Position{Tokens: make(map[string]state.TokenPosition)},
-			Balance: state.Balance{
-				Available:  snapshotRec.Available,
-				Reserved:   snapshotRec.Reserved,
-				MinBalance: snapshotRec.MinBalance,
-			},
-		}, reservations)
-		e.restoreOpenOrdersTracking(openOrders)
+			reservations := make([]state.ReservationSnapshot, 0, len(openOrders))
+			for _, order := range openOrders {
+				if order.RemainingSize <= 0 {
+					continue
+				}
+				reserved := order.Reserved
+				if reserved <= 0 {
+					reserved = requiredReservedForOrder(order.Side, order.Price, order.RemainingSize)
+				}
+				if reserved <= 0 {
+					continue
+				}
+				reservations = append(reservations, state.ReservationSnapshot{
+					OrderID:       order.OrderID,
+					MarketID:      order.MarketID,
+					TokenID:       order.TokenID,
+					Side:          order.Side,
+					Price:         order.Price,
+					RemainingSize: order.RemainingSize,
+					Reserved:      reserved,
+				})
+			}
+
+			tokenPositions := make(map[string]state.TokenPosition, len(snapshotRec.Tokens))
+			for tokenID, tp := range snapshotRec.Tokens {
+				tokenPositions[tokenID] = state.TokenPosition{
+					Available: tp.Available,
+					Reserved:  tp.Reserved,
+				}
+			}
+
+			e.State.Restore(state.Snapshot{
+				Position: state.Position{Tokens: tokenPositions},
+				Balance: state.Balance{
+					Available:  snapshotRec.Available,
+					Reserved:   snapshotRec.Reserved,
+					MinBalance: snapshotRec.MinBalance,
+				},
+			}, reservations)
+			e.restoreOpenOrdersTracking(openOrders)
+			restoredFromSnapshot = true
+		}
+	}
+
+	if restoredFromSnapshot {
 		return
 	}
 
@@ -468,10 +480,18 @@ func (e *Engine) saveStateSnapshot(now time.Time) {
 		return
 	}
 	snap := e.State.Snapshot()
+	tokens := make(map[string]store.TokenPositionRecord, len(snap.Position.Tokens))
+	for tokenID, tp := range snap.Position.Tokens {
+		tokens[tokenID] = store.TokenPositionRecord{
+			Available: tp.Available,
+			Reserved:  tp.Reserved,
+		}
+	}
 	rec := store.SnapshotRecord{
 		Available:  snap.Balance.Available,
 		Reserved:   snap.Balance.Reserved,
 		MinBalance: snap.Balance.MinBalance,
+		Tokens:     tokens,
 		At:         now.UnixNano(),
 	}
 	if err := e.StateStore.SaveSnapshot(rec); err != nil {
