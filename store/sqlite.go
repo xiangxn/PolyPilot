@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,7 +45,7 @@ func migrateSQLite(db *sql.DB) error {
 			order_id TEXT PRIMARY KEY,
 			market_id TEXT,
 			token_id TEXT,
-			side TEXT,
+			side int,
 			price REAL,
 			requested_size REAL,
 			remaining_size REAL,
@@ -59,7 +60,7 @@ func migrateSQLite(db *sql.DB) error {
 			market_id TEXT,
 			token_id TEXT,
 			price REAL,
-			side TEXT,
+			side int,
 			requested_size REAL,
 			filled_size REAL,
 			status TEXT,
@@ -71,8 +72,7 @@ func migrateSQLite(db *sql.DB) error {
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			available REAL,
 			reserved REAL,
-			buy REAL,
-			sell REAL,
+			tokens TEXT,
 			at INTEGER
 		);`,
 	}
@@ -175,28 +175,38 @@ func (s *SQLiteExecutionStore) ListExecutionsSince(unixNano int64) ([]core.Execu
 }
 
 func (s *SQLiteStateStore) SaveSnapshot(snapshot SnapshotRecord) error {
-	_, err := s.db.Exec(`INSERT INTO state_snapshot (id, available, reserved, buy, sell, at)
-		VALUES (1, ?, ?, ?, ?, ?)
+	tokensJSON, err := json.Marshal(snapshot.Tokens)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO state_snapshot (id, available, reserved, tokens, at)
+		VALUES (1, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			available=excluded.available,
 			reserved=excluded.reserved,
-			buy=excluded.buy,
-			sell=excluded.sell,
+			tokens=excluded.tokens,
 			at=excluded.at`,
-		snapshot.Available, snapshot.Reserved, snapshot.Buy, snapshot.Sell, snapshot.At,
+		snapshot.Available, snapshot.Reserved, string(tokensJSON), snapshot.At,
 	)
 	return err
 }
 
 func (s *SQLiteStateStore) LoadLatestSnapshot() (SnapshotRecord, bool, error) {
-	row := s.db.QueryRow(`SELECT available, reserved, buy, sell, at FROM state_snapshot WHERE id = 1`)
+	row := s.db.QueryRow(`SELECT available, reserved, tokens, at FROM state_snapshot WHERE id = 1`)
 	var rec SnapshotRecord
-	err := row.Scan(&rec.Available, &rec.Reserved, &rec.Buy, &rec.Sell, &rec.At)
+	var tokensJSON sql.NullString
+	err := row.Scan(&rec.Available, &rec.Reserved, &tokensJSON, &rec.At)
 	if err == sql.ErrNoRows {
 		return SnapshotRecord{}, false, nil
 	}
 	if err != nil {
 		return SnapshotRecord{}, false, err
+	}
+	rec.Tokens = map[string]TokenPositionRecord{}
+	if tokensJSON.Valid && tokensJSON.String != "" {
+		if err := json.Unmarshal([]byte(tokensJSON.String), &rec.Tokens); err != nil {
+			return SnapshotRecord{}, false, err
+		}
 	}
 	return rec, true, nil
 }

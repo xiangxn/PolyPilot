@@ -1,12 +1,16 @@
 package store
 
-import "polypilot/core"
+import (
+	"polypilot/core"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
+)
 
 type OrderRecord struct {
 	OrderID       string
 	MarketID      string
 	TokenID       string
-	Side          string
+	Side          model.Side
 	Price         float64
 	RequestedSize float64
 	RemainingSize float64
@@ -15,11 +19,15 @@ type OrderRecord struct {
 	UpdatedAt     int64
 }
 
+type TokenPositionRecord struct {
+	Available float64
+	Reserved  float64
+}
+
 type SnapshotRecord struct {
 	Available float64
 	Reserved  float64
-	Buy       float64
-	Sell      float64
+	Tokens    map[string]TokenPositionRecord
 	At        int64
 }
 

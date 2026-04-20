@@ -1,9 +1,12 @@
 package store
 
 import (
+	"os"
 	"polypilot/core"
 	"testing"
 	"time"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
 func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
@@ -17,7 +20,7 @@ func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
 		OrderID:       "ord-1",
 		MarketID:      "market-1",
 		TokenID:       "token-1",
-		Side:          core.SideBuy,
+		Side:          model.BUY,
 		Price:         0.5,
 		RequestedSize: 10,
 		RemainingSize: 10,
@@ -27,6 +30,7 @@ func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert order failed: %v", err)
 	}
+
 	orders, err := orderStore.ListOpenOrders()
 	if err != nil {
 		t.Fatalf("list open orders failed: %v", err)
@@ -36,13 +40,21 @@ func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
 	}
 
 	now := time.Now()
+	recent, err := executionStore.ListExecutionsSince(now.UnixNano())
+	if err != nil {
+		t.Fatalf("list executions failed: %v", err)
+	}
+	if len(recent) != 0 {
+		t.Fatalf("expected empty executions initially, got %+v", recent)
+	}
+
 	if err := executionStore.AppendExecution(core.ExecutionEvent{OrderID: "ord-1", Status: core.ExecutionStatusAccepted, At: now.Add(-time.Second)}); err != nil {
 		t.Fatalf("append execution failed: %v", err)
 	}
 	if err := executionStore.AppendExecution(core.ExecutionEvent{OrderID: "ord-1", Status: core.ExecutionStatusFilled, At: now}); err != nil {
 		t.Fatalf("append execution failed: %v", err)
 	}
-	recent, err := executionStore.ListExecutionsSince(now.UnixNano())
+	recent, err = executionStore.ListExecutionsSince(now.UnixNano())
 	if err != nil {
 		t.Fatalf("list executions failed: %v", err)
 	}
@@ -50,7 +62,14 @@ func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected executions: %+v", recent)
 	}
 
-	if err := stateStore.SaveSnapshot(SnapshotRecord{Available: 90, Reserved: 10, Buy: 2, Sell: 1, At: now.UnixNano()}); err != nil {
+	if err := stateStore.SaveSnapshot(SnapshotRecord{
+		Available: 90,
+		Reserved:  10,
+		Tokens: map[string]TokenPositionRecord{
+			"token-1": {Available: 2, Reserved: 1},
+		},
+		At: now.UnixNano(),
+	}); err != nil {
 		t.Fatalf("save snapshot failed: %v", err)
 	}
 	rec, ok, err := stateStore.LoadLatestSnapshot()
@@ -60,7 +79,83 @@ func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected snapshot exists")
 	}
-	if rec.Available != 90 || rec.Reserved != 10 || rec.Buy != 2 || rec.Sell != 1 {
-		t.Fatalf("unexpected snapshot: %+v", rec)
+	if rec.Available != 90 || rec.Reserved != 10 {
+		t.Fatalf("unexpected snapshot basics: %+v", rec)
+	}
+	tp, exists := rec.Tokens["token-1"]
+	if !exists || tp.Available != 2 || tp.Reserved != 1 {
+		t.Fatalf("unexpected snapshot tokens: %+v", rec.Tokens)
+	}
+}
+
+func TestSQLiteStores_LoadEmptySnapshotAndMissingOrder(t *testing.T) {
+	dbPath := t.TempDir() + "/polymarket.db"
+	orderStore, _, stateStore, err := NewSQLiteStores(dbPath)
+	if err != nil {
+		t.Fatalf("new sqlite stores failed: %v", err)
+	}
+
+	_, ok, err := stateStore.LoadLatestSnapshot()
+	if err != nil {
+		t.Fatalf("load latest snapshot failed: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected no snapshot yet")
+	}
+
+	_, ok, err = orderStore.GetOrder("missing")
+	if err != nil {
+		t.Fatalf("get order failed: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected missing order")
+	}
+}
+
+func TestSQLiteStores_ListOpenOrders_FiltersFinalStatuses(t *testing.T) {
+	dbPath := t.TempDir() + "/polymarket.db"
+	orderStore, _, _, err := NewSQLiteStores(dbPath)
+	if err != nil {
+		t.Fatalf("new sqlite stores failed: %v", err)
+	}
+	statuses := []core.ExecutionStatus{
+		core.ExecutionStatusAccepted,
+		core.ExecutionStatusFilled,
+		core.ExecutionStatusCancelled,
+		core.ExecutionStatusRejected,
+	}
+	for i, st := range statuses {
+		if err := orderStore.UpsertOrder(OrderRecord{
+			OrderID:       "ord-" + time.Now().Add(time.Duration(i)*time.Nanosecond).Format("150405.000000000"),
+			MarketID:      "m",
+			TokenID:       "t",
+			Side:          model.BUY,
+			Price:         0.5,
+			RequestedSize: 1,
+			RemainingSize: 1,
+			Reserved:      0.5,
+			Status:        st,
+			UpdatedAt:     time.Now().UnixNano(),
+		}); err != nil {
+			t.Fatalf("upsert failed: %v", err)
+		}
+	}
+	open, err := orderStore.ListOpenOrders()
+	if err != nil {
+		t.Fatalf("list open orders failed: %v", err)
+	}
+	if len(open) != 1 || open[0].Status != core.ExecutionStatusAccepted {
+		t.Fatalf("unexpected open orders: %+v", open)
+	}
+}
+
+func TestNewSQLiteStores_InvalidPath(t *testing.T) {
+	base := t.TempDir() + "/not-a-dir"
+	if err := os.WriteFile(base, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write temp file failed: %v", err)
+	}
+	_, _, _, err := NewSQLiteStores(base + "/db.sqlite")
+	if err == nil {
+		t.Fatalf("expected NewSQLiteStores to fail on invalid parent path")
 	}
 }

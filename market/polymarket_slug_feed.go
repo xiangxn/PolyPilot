@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tidwall/gjson"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	"github.com/xiangxn/go-polymarket-sdk/utils"
 )
@@ -70,10 +71,15 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 	go func() {
 		for {
 			slug := f.slugFor(time.Now())
-			market, err := f.FetchMarketBySlug(slug)
+			market, rawMarket, err := f.FetchMarketBySlug(slug)
 			if err != nil {
 				return
 			}
+
+			f.Bus.Publish(core.Event{
+				Type: core.EventMarket,
+				Data: *rawMarket,
+			})
 
 			f.MarketMonitor.SubscribeTokens(market.TokenIDs...)
 
@@ -87,6 +93,7 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case orderBook := <-obChan:
+					// log.Printf("orderBook: %+v", orderBook)
 					f.Bus.Publish(core.Event{
 						Type: core.EventOrderBook,
 						Data: orderBook,
@@ -101,33 +108,33 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 	}()
 }
 
-func (f *PolymarketSlugFeed) FetchMarketBySlug(slug string) (*SlugMarket, error) {
+func (f *PolymarketSlugFeed) FetchMarketBySlug(slug string) (*SlugMarket, *gjson.Result, error) {
 	if strings.TrimSpace(slug) == "" {
-		return nil, fmt.Errorf("slug cannot be empty")
+		return nil, nil, fmt.Errorf("slug cannot be empty")
 	}
 
 	client := f.MarketMonitor.GetClient()
 	result, err := client.FetchMarketBySlug(slug)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	marketID := result.Get("conditionId").String()
 	tokenIDs := utils.GetStringArray(result, "clobTokenIds")
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("no clob token ids in market slug=%s", slug)
+		return nil, nil, fmt.Errorf("no clob token ids in market slug=%s", slug)
 	}
 
 	prices := utils.GetFloatArray(result, "outcomePrices")
 
 	endDate, err := utils.ToTimestamp(result.Get("endDate").String())
 	if err != nil {
-		return nil, fmt.Errorf("invalid market endDate slug=%s: %w", slug, err)
+		return nil, nil, fmt.Errorf("invalid market endDate slug=%s: %w", slug, err)
 	}
 
 	startDate, err := utils.ToTimestamp(result.Get("startDate").String())
 	if err != nil {
-		return nil, fmt.Errorf("invalid market startDate slug=%s: %w", slug, err)
+		return nil, nil, fmt.Errorf("invalid market startDate slug=%s: %w", slug, err)
 	}
 
 	outcomes := utils.GetStringArray(result, "outcomes")
@@ -158,7 +165,7 @@ func (f *PolymarketSlugFeed) FetchMarketBySlug(slug string) (*SlugMarket, error)
 		StartDate:        startDate,
 		Closed:           result.Get("closed").Bool(),
 		Outcomes:         outcomes,
-	}, nil
+	}, result, nil
 }
 
 func (f *PolymarketSlugFeed) slugFor(now time.Time) string {

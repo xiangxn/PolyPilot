@@ -4,9 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"polypilot/core"
 	"polypilot/runtime"
 	"polypilot/state"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
 type Engine struct{}
@@ -31,12 +32,6 @@ func (r *Engine) Check(orders []runtime.OrderIntent, s state.Snapshot) error {
 			return errors.New("invalid order price")
 		}
 
-		switch o.Side {
-		case core.SideBuy, core.SideSell:
-		default:
-			return errors.New("invalid order side")
-		}
-
 		required += requiredCollateral(o.Side, o.Price, o.Size)
 	}
 
@@ -56,11 +51,11 @@ func isTickAligned(price, tick float64) bool {
 	return math.Abs(price-aligned) <= 1e-9
 }
 
-func requiredCollateral(side string, price, size float64) float64 {
+func requiredCollateral(side model.Side, price, size float64) float64 {
 	switch side {
-	case core.SideBuy:
+	case model.BUY:
 		return size * price
-	case core.SideSell:
+	case model.SELL:
 		return 0
 	default:
 		return 0

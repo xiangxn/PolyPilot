@@ -8,6 +8,8 @@ import (
 	"polypilot/state"
 	"polypilot/store"
 	"time"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
 const (
@@ -41,16 +43,18 @@ func (e *Engine) Start(ctx context.Context) {
 			continue
 		}
 		feed.Init(e.Bus)
-		feed.Start(ctx)
 	}
 	if e.Exec != nil {
-		e.Exec.Init(e.Bus)
+		e.Exec.Init(e.Bus, ctx)
+	}
+	if e.Probability != nil {
+		e.Probability.Init(ctx)
 	}
 	for _, strategy := range e.Strategies {
 		if strategy == nil {
 			continue
 		}
-		strategy.Init(e.Bus)
+		strategy.Init(e.Bus, ctx)
 	}
 
 	ch, cancel := e.Bus.SubscribeWithCancel()
@@ -65,9 +69,9 @@ func (e *Engine) Start(ctx context.Context) {
 					return
 				}
 				switch ev.Type {
-				case core.EventMarket, core.EventOrderBook:
-					e.marketEvents.Add(1)
-					e.handleMarketUpdate(ev)
+				case core.EventMarket, core.EventOrderBook, core.EventSignal:
+					e.inputEvents.Add(1)
+					e.handleInputUpdate(ev)
 
 				case core.EventExecution:
 					data, ok := ev.Data.(core.ExecutionEvent)
@@ -86,6 +90,13 @@ func (e *Engine) Start(ctx context.Context) {
 			}
 		}
 	}()
+
+	for _, feed := range e.Feeds {
+		if feed == nil {
+			continue
+		}
+		feed.Start(ctx)
+	}
 
 	cleanupTicker := time.NewTicker(1 * time.Second)
 	metricsTicker := time.NewTicker(10 * time.Second)
@@ -116,11 +127,7 @@ func (e *Engine) Close() {
 	}
 }
 
-func (e *Engine) handleOrderBookUpdate(ev core.Event) {
-
-}
-
-func (e *Engine) handleMarketUpdate(ev core.Event) {
+func (e *Engine) handleInputUpdate(ev core.Event) {
 	if e.Probability == nil {
 		e.publishRisk("probability model is nil")
 		return
@@ -132,7 +139,7 @@ func (e *Engine) handleMarketUpdate(ev core.Event) {
 
 	obs, ok := e.Probability.OnUpdate(ev)
 	if !ok {
-		e.publishRisk("invalid market event payload")
+		// e.publishRisk("invalid market event payload")
 		return
 	}
 	e.ticks.Add(1)
@@ -398,7 +405,14 @@ func (e *Engine) restoreFromStore() {
 
 		reservations := make([]state.ReservationSnapshot, 0, len(openOrders))
 		for _, order := range openOrders {
-			if order.RemainingSize <= 0 || order.Reserved <= 0 {
+			if order.RemainingSize <= 0 {
+				continue
+			}
+			reserved := order.Reserved
+			if reserved <= 0 {
+				reserved = requiredReservedForOrder(order.Side, order.Price, order.RemainingSize)
+			}
+			if reserved <= 0 {
 				continue
 			}
 			reservations = append(reservations, state.ReservationSnapshot{
@@ -408,12 +422,12 @@ func (e *Engine) restoreFromStore() {
 				Side:          order.Side,
 				Price:         order.Price,
 				RemainingSize: order.RemainingSize,
-				Reserved:      order.Reserved,
+				Reserved:      reserved,
 			})
 		}
 
 		e.State.Restore(state.Snapshot{
-			Position: state.Position{Buy: snapshotRec.Buy, Sell: snapshotRec.Sell},
+			Position: state.Position{Tokens: make(map[string]state.TokenPosition)},
 			Balance:  state.Balance{Available: snapshotRec.Available, Reserved: snapshotRec.Reserved},
 		}, reservations)
 		e.restoreOpenOrdersTracking(openOrders)
@@ -449,8 +463,6 @@ func (e *Engine) saveStateSnapshot(now time.Time) {
 	rec := store.SnapshotRecord{
 		Available: snap.Balance.Available,
 		Reserved:  snap.Balance.Reserved,
-		Buy:       snap.Position.Buy,
-		Sell:      snap.Position.Sell,
 		At:        now.UnixNano(),
 	}
 	if err := e.StateStore.SaveSnapshot(rec); err != nil {
@@ -479,9 +491,9 @@ func (e *Engine) upsertOrderRecord(data core.ExecutionEvent) {
 	if data.TokenID != "" {
 		rec.TokenID = data.TokenID
 	}
-	if data.Side != "" {
-		rec.Side = data.Side
-	}
+
+	rec.Side = data.Side
+
 	if data.Price > 0 {
 		rec.Price = data.Price
 	}
@@ -513,11 +525,15 @@ func (e *Engine) upsertOrderRecord(data core.ExecutionEvent) {
 	}
 }
 
-func requiredReservedForOrder(side string, price, size float64) float64 {
-	if side == core.SideBuy {
+func requiredReservedForOrder(side model.Side, price, size float64) float64 {
+	switch side {
+	case model.BUY:
 		return price * size
+	case model.SELL:
+		return size
+	default:
+		return 0
 	}
-	return 0
 }
 
 func (e *Engine) publishRisk(reason string) {
@@ -538,7 +554,7 @@ func (e *Engine) publishMetrics() {
 		Type: core.EventMetrics,
 		Data: core.MetricsEvent{
 			Ticks:             e.ticks.Load(),
-			MarketEvents:      e.marketEvents.Load(),
+			InputEvents:       e.inputEvents.Load(),
 			ExecutionEvents:   e.executionEvents.Load(),
 			ExecutionAccepted: e.executionAccepted.Load(),
 			ExecutionFilled:   e.executionFilled.Load(),

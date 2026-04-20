@@ -1,11 +1,14 @@
 package execution
 
 import (
+	"context"
 	"fmt"
 	"polypilot/core"
 	"polypilot/runtime"
 	"sync/atomic"
 	"time"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
 type Executor struct {
@@ -13,7 +16,7 @@ type Executor struct {
 	seq atomic.Uint64
 }
 
-func (e *Executor) Init(bus *core.EventBus) {
+func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
 	e.Bus = bus
 }
 
@@ -24,7 +27,7 @@ func (e *Executor) Execute(orders []runtime.OrderIntent) {
 
 	for _, o := range orders {
 		switch o.Side {
-		case core.SideBuy, core.SideSell:
+		case model.BUY, model.SELL:
 			e.submitSingle(o)
 		default:
 			e.publish(core.ExecutionEvent{

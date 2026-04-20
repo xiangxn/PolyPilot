@@ -13,6 +13,8 @@ import (
 	"polypilot/state"
 	"polypilot/strategy"
 	"syscall"
+
+	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
 func main() {
@@ -28,10 +30,10 @@ func main() {
 			SlugPrefix:    "btc-updown-5m",
 			WindowMinutes: 5,
 			SignerKey:     os.Getenv("POLYMARKET_SIGNER_KEY"),
-		}},
+		}, &market.CryptoPriceFeed{MonitoSymble: "btc", MonitorType: sdk.MonitorChainlink}},
 		Observers:   []runtime.Observer{&observer.Logger{}},
 		Probability: &probability.Engine{},
-		Strategies:  []runtime.Strategy{&strategy.MockStrategy{}},
+		Strategies:  []runtime.Strategy{&strategy.Strategy{}},
 	}
 
 	engine.Start(ctx)

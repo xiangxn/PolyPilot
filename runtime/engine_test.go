@@ -1,12 +1,19 @@
 package runtime
 
 import (
+	"math"
 	"polypilot/core"
 	"polypilot/state"
 	"polypilot/store"
 	"testing"
 	"time"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
 )
+
+func almostEqual(a, b float64) bool {
+	return math.Abs(a-b) <= 1e-9
+}
 
 func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 	e := &Engine{
@@ -21,7 +28,7 @@ func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 		MarketID:      "market-1",
 		TokenID:       "token-1",
 		Price:         0.60,
-		Side:          core.SideBuy,
+		Side:          model.BUY,
 		RequestedSize: 10,
 		FilledSize:    10,
 		Status:        core.ExecutionStatusFilled,
@@ -29,8 +36,11 @@ func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 	}, true)
 
 	s1 := e.State.Snapshot()
-	if s1.Position.Buy != 0 || s1.Balance.Reserved != 0 || s1.Balance.Available != 100 {
+	if !almostEqual(s1.Balance.Reserved, 0) || !almostEqual(s1.Balance.Available, 100) {
 		t.Fatalf("unexpected pre-accepted state: %+v", s1)
+	}
+	if tp := s1.Position.Tokens["token-1"]; !almostEqual(tp.Available, 0) || !almostEqual(tp.Reserved, 0) {
+		t.Fatalf("unexpected token position before accepted: %+v", tp)
 	}
 	if len(e.pendingByOrder) != 1 {
 		t.Fatalf("expected 1 pending order, got %d", len(e.pendingByOrder))
@@ -41,7 +51,7 @@ func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 		MarketID:      "market-1",
 		TokenID:       "token-1",
 		Price:         0.60,
-		Side:          core.SideBuy,
+		Side:          model.BUY,
 		RequestedSize: 10,
 		FilledSize:    0,
 		Status:        core.ExecutionStatusAccepted,
@@ -49,13 +59,14 @@ func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 	}, true)
 
 	s2 := e.State.Snapshot()
-	if s2.Position.Buy != 10 {
-		t.Fatalf("expected buy position=10, got %.2f", s2.Position.Buy)
+	tp := s2.Position.Tokens["token-1"]
+	if !almostEqual(tp.Available, 10) || !almostEqual(tp.Reserved, 0) {
+		t.Fatalf("expected token-1 available=10 reserved=0, got %+v", tp)
 	}
-	if s2.Balance.Reserved != 0 {
+	if !almostEqual(s2.Balance.Reserved, 0) {
 		t.Fatalf("expected reserved=0, got %.2f", s2.Balance.Reserved)
 	}
-	if s2.Balance.Available != 94 {
+	if !almostEqual(s2.Balance.Available, 94) {
 		t.Fatalf("expected available=94, got %.2f", s2.Balance.Available)
 	}
 	if len(e.pendingByOrder) != 0 {
@@ -77,7 +88,7 @@ func TestCleanupExpiredPending(t *testing.T) {
 		MarketID:      "market-1",
 		TokenID:       "token-2",
 		Price:         0.40,
-		Side:          core.SideSell,
+		Side:          model.SELL,
 		RequestedSize: 5,
 		FilledSize:    5,
 		Status:        core.ExecutionStatusFilled,
@@ -131,20 +142,30 @@ func TestRestoreFromStore_SnapshotAndOpenOrders(t *testing.T) {
 	_ = stateStore.SaveSnapshot(store.SnapshotRecord{
 		Available: 80,
 		Reserved:  20,
-		Buy:       2,
-		Sell:      1,
 		At:        time.Now().UnixNano(),
 	})
 	_ = orderStore.UpsertOrder(store.OrderRecord{
-		OrderID:       "ord-open-1",
+		OrderID:       "ord-open-buy",
 		MarketID:      "market-1",
 		TokenID:       "token-1",
-		Side:          core.SideBuy,
+		Side:          model.BUY,
 		Price:         0.5,
 		RequestedSize: 10,
 		RemainingSize: 10,
 		Reserved:      5,
 		Status:        core.ExecutionStatusAccepted,
+		UpdatedAt:     time.Now().UnixNano(),
+	})
+	_ = orderStore.UpsertOrder(store.OrderRecord{
+		OrderID:       "ord-open-sell",
+		MarketID:      "market-1",
+		TokenID:       "token-2",
+		Side:          model.SELL,
+		Price:         0.6,
+		RequestedSize: 4,
+		RemainingSize: 4,
+		Reserved:      0,
+		Status:        core.ExecutionStatusPartiallyFilled,
 		UpdatedAt:     time.Now().UnixNano(),
 	})
 
@@ -158,21 +179,28 @@ func TestRestoreFromStore_SnapshotAndOpenOrders(t *testing.T) {
 	e.restoreFromStore()
 
 	snap := e.State.Snapshot()
-	if snap.Balance.Available != 80 || snap.Balance.Reserved != 20 {
-		t.Fatalf("unexpected restored balance: %+v", snap.Balance)
+	if !almostEqual(snap.Balance.Available, 80) {
+		t.Fatalf("unexpected restored available: %+v", snap.Balance)
 	}
-	if snap.Position.Buy != 2 || snap.Position.Sell != 1 {
-		t.Fatalf("unexpected restored position: %+v", snap.Position)
+	if !almostEqual(snap.Balance.Reserved, 5) {
+		t.Fatalf("reserved cash should be rebuilt from BUY open orders, got %+v", snap.Balance)
 	}
-	if !e.hasAccepted("ord-open-1") {
-		t.Fatalf("expected open order to be marked accepted")
+	tp2 := snap.Position.Tokens["token-2"]
+	if !almostEqual(tp2.Reserved, 4) {
+		t.Fatalf("SELL open order reserved fallback should be restored, got %+v", tp2)
 	}
-	if err := e.State.ApplyFill("ord-open-1", "market-1", "token-1", core.SideBuy, 2); err != nil {
-		t.Fatalf("expected restored reservation usable, got err=%v", err)
+	if !e.hasAccepted("ord-open-buy") || !e.hasAccepted("ord-open-sell") {
+		t.Fatalf("expected open orders to be marked accepted")
+	}
+	if err := e.State.ApplyFill("ord-open-buy", "market-1", "token-1", model.BUY, 2); err != nil {
+		t.Fatalf("expected restored BUY reservation usable, got err=%v", err)
+	}
+	if err := e.State.ApplyFill("ord-open-sell", "market-1", "token-2", model.SELL, 1); err != nil {
+		t.Fatalf("expected restored SELL reservation usable, got err=%v", err)
 	}
 }
 
-func TestUpsertOrderRecord_Lifecycle(t *testing.T) {
+func TestUpsertOrderRecord_Lifecycle_Buy(t *testing.T) {
 	orderStore := store.NewMemoryOrderStore()
 	e := &Engine{Bus: core.NewEventBus(), OrderStore: orderStore}
 
@@ -181,7 +209,7 @@ func TestUpsertOrderRecord_Lifecycle(t *testing.T) {
 		MarketID:      "market-1",
 		TokenID:       "token-1",
 		Price:         0.4,
-		Side:          core.SideBuy,
+		Side:          model.BUY,
 		RequestedSize: 10,
 		Status:        core.ExecutionStatusAccepted,
 		At:            time.Now(),
@@ -191,7 +219,7 @@ func TestUpsertOrderRecord_Lifecycle(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("expected stored order, err=%v ok=%v", err, ok)
 	}
-	if rec.RemainingSize != 10 || rec.Reserved != 4 {
+	if !almostEqual(rec.RemainingSize, 10) || !almostEqual(rec.Reserved, 4) {
 		t.Fatalf("unexpected accepted record: %+v", rec)
 	}
 
@@ -202,7 +230,7 @@ func TestUpsertOrderRecord_Lifecycle(t *testing.T) {
 		At:         time.Now(),
 	})
 	rec, ok, _ = orderStore.GetOrder("ord-1")
-	if !ok || rec.RemainingSize != 7 {
+	if !ok || !almostEqual(rec.RemainingSize, 7) || !almostEqual(rec.Reserved, 2.8) {
 		t.Fatalf("unexpected partial record: %+v", rec)
 	}
 
@@ -212,7 +240,230 @@ func TestUpsertOrderRecord_Lifecycle(t *testing.T) {
 		At:      time.Now(),
 	})
 	rec, ok, _ = orderStore.GetOrder("ord-1")
-	if !ok || rec.RemainingSize != 0 || rec.Reserved != 0 {
+	if !ok || !almostEqual(rec.RemainingSize, 0) || !almostEqual(rec.Reserved, 0) {
 		t.Fatalf("unexpected final record: %+v", rec)
+	}
+}
+
+func TestUpsertOrderRecord_Lifecycle_SellAndNegativeFill(t *testing.T) {
+	orderStore := store.NewMemoryOrderStore()
+	e := &Engine{Bus: core.NewEventBus(), OrderStore: orderStore}
+
+	e.upsertOrderRecord(core.ExecutionEvent{
+		OrderID:       "ord-sell-1",
+		MarketID:      "market-1",
+		TokenID:       "token-2",
+		Price:         0.7,
+		Side:          model.SELL,
+		RequestedSize: 5,
+		Status:        core.ExecutionStatusAccepted,
+		At:            time.Now(),
+	})
+	rec, ok, _ := orderStore.GetOrder("ord-sell-1")
+	if !ok || !almostEqual(rec.Reserved, 5) {
+		t.Fatalf("sell accepted reserved should equal size, got %+v", rec)
+	}
+
+	e.upsertOrderRecord(core.ExecutionEvent{
+		OrderID:    "ord-sell-1",
+		Side:       model.SELL,
+		FilledSize: -2,
+		Status:     core.ExecutionStatusPartiallyFilled,
+		At:         time.Now(),
+	})
+	rec, ok, _ = orderStore.GetOrder("ord-sell-1")
+	if !ok || !almostEqual(rec.RemainingSize, 5) || !almostEqual(rec.Reserved, 5) {
+		t.Fatalf("negative fill should be treated as 0, got %+v", rec)
+	}
+
+	e.upsertOrderRecord(core.ExecutionEvent{
+		OrderID: "ord-sell-1",
+		Status:  core.ExecutionStatusRejected,
+		At:      time.Now(),
+	})
+	rec, ok, _ = orderStore.GetOrder("ord-sell-1")
+	if !ok || !almostEqual(rec.RemainingSize, 0) || !almostEqual(rec.Reserved, 0) {
+		t.Fatalf("unexpected rejected record: %+v", rec)
+	}
+}
+
+func TestSaveStateSnapshot(t *testing.T) {
+	stateStore := store.NewMemoryStateStore()
+	s := state.NewState(100)
+	if err := s.ReserveOrder("ord-save", "market-1", "token-1", model.BUY, 0.5, 10); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	e := &Engine{Bus: core.NewEventBus(), State: s, StateStore: stateStore}
+	now := time.Now()
+	e.saveStateSnapshot(now)
+
+	rec, ok, err := stateStore.LoadLatestSnapshot()
+	if err != nil || !ok {
+		t.Fatalf("expected saved snapshot, err=%v ok=%v", err, ok)
+	}
+	if !almostEqual(rec.Available, 95) || !almostEqual(rec.Reserved, 5) {
+		t.Fatalf("unexpected snapshot record: %+v", rec)
+	}
+	if rec.At != now.UnixNano() {
+		t.Fatalf("unexpected snapshot timestamp: %+v", rec)
+	}
+}
+
+func TestHandleExecutionEvent_CancelledAndRejected(t *testing.T) {
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(100)}
+	e.initOrderTracking()
+
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID:       "ord-cancel",
+		MarketID:      "market-1",
+		TokenID:       "token-1",
+		Price:         0.5,
+		Side:          model.BUY,
+		RequestedSize: 10,
+		Status:        core.ExecutionStatusAccepted,
+		At:            time.Now(),
+	}, true)
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID: "ord-cancel",
+		Status:  core.ExecutionStatusCancelled,
+		At:      time.Now(),
+	}, true)
+
+	snap := e.State.Snapshot()
+	if !almostEqual(snap.Balance.Available, 100) || !almostEqual(snap.Balance.Reserved, 0) {
+		t.Fatalf("cancel should release reserved cash, got %+v", snap.Balance)
+	}
+	if !e.isFinalized("ord-cancel") {
+		t.Fatalf("cancelled order should be finalized")
+	}
+
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID:       "ord-reject",
+		MarketID:      "market-1",
+		TokenID:       "token-1",
+		Price:         0.5,
+		Side:          model.BUY,
+		RequestedSize: 5,
+		Status:        core.ExecutionStatusAccepted,
+		At:            time.Now(),
+	}, true)
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID: "ord-reject",
+		Status:  core.ExecutionStatusRejected,
+		Reason:  "reject-test",
+		At:      time.Now(),
+	}, true)
+	if !e.isFinalized("ord-reject") {
+		t.Fatalf("rejected order should be finalized")
+	}
+	if got := e.executionRejected.Load(); got == 0 {
+		t.Fatalf("executionRejected should increase")
+	}
+}
+
+func TestRestoreFromStore_ExecutionLogPath(t *testing.T) {
+	execStore := store.NewMemoryExecutionStore()
+	now := time.Now()
+	_ = execStore.AppendExecution(core.ExecutionEvent{
+		OrderID:       "ord-log-1",
+		MarketID:      "market-1",
+		TokenID:       "token-1",
+		Price:         0.2,
+		Side:          model.BUY,
+		RequestedSize: 10,
+		Status:        core.ExecutionStatusAccepted,
+		At:            now,
+	})
+	_ = execStore.AppendExecution(core.ExecutionEvent{
+		OrderID:    "ord-log-1",
+		MarketID:   "market-1",
+		TokenID:    "token-1",
+		Price:      0.2,
+		Side:       model.BUY,
+		FilledSize: 3,
+		Status:     core.ExecutionStatusPartiallyFilled,
+		At:         now.Add(time.Millisecond),
+	})
+
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(100), ExecutionStore: execStore}
+	e.initOrderTracking()
+	e.restoreFromStore()
+
+	snap := e.State.Snapshot()
+	if !almostEqual(snap.Balance.Available, 98) || !almostEqual(snap.Balance.Reserved, 1.4) {
+		t.Fatalf("unexpected replayed state: %+v", snap.Balance)
+	}
+	tp := snap.Position.Tokens["token-1"]
+	if !almostEqual(tp.Available, 3) {
+		t.Fatalf("unexpected token position after execution replay: %+v", tp)
+	}
+}
+
+func TestPublishRiskAndMetrics(t *testing.T) {
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(100)}
+	e.initOrderTracking()
+
+	ch, cancel := e.Bus.SubscribeWithCancel()
+	defer cancel()
+
+	e.publishRisk("risk-test")
+	e.publishMetrics()
+
+	gotRisk := false
+	gotMetrics := false
+	deadline := time.After(1 * time.Second)
+	for !(gotRisk && gotMetrics) {
+		select {
+		case ev := <-ch:
+			switch ev.Type {
+			case core.EventRisk:
+				gotRisk = true
+			case core.EventMetrics:
+				gotMetrics = true
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting risk/metrics event, risk=%v metrics=%v", gotRisk, gotMetrics)
+		}
+	}
+}
+
+func TestCleanupTrackingAndPendingCount(t *testing.T) {
+	e := &Engine{
+		Bus:               core.NewEventBus(),
+		State:             state.NewState(100),
+		PendingEventTTL:   1 * time.Second,
+		FinalizedOrderTTL: 1 * time.Second,
+	}
+	e.initOrderTracking()
+
+	e.bufferExecution(core.ExecutionEvent{OrderID: "ord-pending", Status: core.ExecutionStatusFilled, At: time.Now()})
+	if e.pendingOrderCount() != 1 {
+		t.Fatalf("expected pending count=1")
+	}
+	pending := e.pendingByOrder["ord-pending"]
+	pending.firstSeen = time.Now().Add(-2 * time.Second)
+	e.pendingByOrder["ord-pending"] = pending
+	e.finalized["ord-final"] = struct{}{}
+	e.finalizedAt["ord-final"] = time.Now().Add(-2 * time.Second)
+
+	e.cleanupTracking(time.Now())
+	if e.pendingOrderCount() != 0 {
+		t.Fatalf("expected pending cleanup done")
+	}
+	if _, ok := e.finalized["ord-final"]; ok {
+		t.Fatalf("expected finalized cleanup done")
+	}
+}
+
+func TestRequiredReservedForOrder(t *testing.T) {
+	if !almostEqual(requiredReservedForOrder(model.BUY, 0.4, 10), 4) {
+		t.Fatalf("buy required reserve mismatch")
+	}
+	if !almostEqual(requiredReservedForOrder(model.SELL, 0.4, 10), 10) {
+		t.Fatalf("sell required reserve mismatch")
+	}
+	if !almostEqual(requiredReservedForOrder(model.Side(99), 0.4, 10), 0) {
+		t.Fatalf("invalid side required reserve should be 0")
 	}
 }

@@ -1,6 +1,10 @@
 package core
 
-import "time"
+import (
+	"time"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
+)
 
 type EventType string
 
@@ -24,7 +28,7 @@ type ExecutionEvent struct {
 	MarketID      string
 	TokenID       string
 	Price         float64
-	Side          string
+	Side          model.Side
 	RequestedSize float64
 	FilledSize    float64
 	Status        ExecutionStatus
@@ -39,7 +43,7 @@ type RiskEvent struct {
 
 type MetricsEvent struct {
 	Ticks             uint64
-	MarketEvents      uint64
+	InputEvents       uint64
 	ExecutionEvents   uint64
 	ExecutionAccepted uint64
 	ExecutionFilled   uint64

@@ -5,6 +5,8 @@ import (
 	"log"
 	"polypilot/core"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 type Logger struct {
@@ -34,11 +36,13 @@ func (l *Logger) Start(ctx context.Context) {
 }
 
 func (l *Logger) logEvent(e core.Event) {
-	switch data := e.Data.(type) {
-	case core.MarketEvent:
-		log.Printf("event=%s price=%.4f at=%d", e.Type, data.Price, data.Timestamp)
-	case core.ExecutionEvent:
-		log.Printf("event=%s order_id=%s market_id=%s token_id=%s status=%s side=%s price=%.4f req=%.2f filled=%.2f reason=%q at=%s",
+	switch e.Type {
+	case core.EventMarket:
+		data := e.Data.(gjson.Result)
+		log.Printf("[observer logger] event=%s question=%s endDate=%s", e.Type, data.Get("question").String(), data.Get("endDate").String())
+	case core.EventExecution:
+		data := e.Data.(core.ExecutionEvent)
+		log.Printf("[observer logger] event=%s order_id=%s market_id=%s token_id=%s status=%s side=%s price=%.4f req=%.2f filled=%.2f reason=%q at=%s",
 			e.Type,
 			data.OrderID,
 			data.MarketID,
@@ -51,13 +55,15 @@ func (l *Logger) logEvent(e core.Event) {
 			data.Reason,
 			data.At.Format(time.RFC3339),
 		)
-	case core.RiskEvent:
-		log.Printf("event=%s reason=%q at=%s", e.Type, data.Reason, data.At.Format(time.RFC3339))
-	case core.MetricsEvent:
-		log.Printf("event=%s ticks=%d market=%d execution=%d accepted=%d filled=%d rejected=%d buffered=%d expired=%d pending_orders=%d risk_rejected=%d orders_sent=%d bus_published=%d bus_dropped=%d subscribers=%d available=%.2f reserved=%.2f at=%s",
+	case core.EventRisk:
+		data := e.Data.(core.RiskEvent)
+		log.Printf("[observer logger] event=%s reason=%q at=%s", e.Type, data.Reason, data.At.Format(time.RFC3339))
+	case core.EventMetrics:
+		data := e.Data.(core.MetricsEvent)
+		log.Printf("[observer logger] event=%s input=%d ticks=%d execution=%d accepted=%d filled=%d rejected=%d buffered=%d expired=%d pending_orders=%d risk_rejected=%d orders_sent=%d bus_published=%d bus_dropped=%d subscribers=%d available=%.2f reserved=%.2f at=%s",
 			e.Type,
+			data.InputEvents,
 			data.Ticks,
-			data.MarketEvents,
 			data.ExecutionEvents,
 			data.ExecutionAccepted,
 			data.ExecutionFilled,
@@ -75,6 +81,6 @@ func (l *Logger) logEvent(e core.Event) {
 			data.At.Format(time.RFC3339),
 		)
 	default:
-		log.Printf("event=%s data=%v", e.Type, e.Data)
+		// log.Printf("[observer logger] event=%s data=%v", e.Type, e.Data)
 	}
 }

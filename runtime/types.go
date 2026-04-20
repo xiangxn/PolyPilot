@@ -8,13 +8,26 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
+type Token struct {
+	Id       string
+	AskPrice float64
+	BidPrice float64
+}
+
 type Observation struct {
-	Probability float64
-	Price       float64
 	At          int64
-	Data        any
+	MarketID    string
+	Tokens      map[string]Token
+	Probability float64
+	TimeLeftSec int64
+	Confidence  float64
+
+	// 可扩展特征（按命名空间 key）
+	Features map[string]any
 }
 
 type Feed interface {
@@ -28,11 +41,12 @@ type Observer interface {
 }
 
 type Probability interface {
+	Init(ctx context.Context)
 	OnUpdate(ev core.Event) (Observation, bool)
 }
 
 type Strategy interface {
-	Init(bus *core.EventBus)
+	Init(bus *core.EventBus, ctx context.Context)
 	OnUpdate(e core.Event, m Observation) []OrderIntent
 }
 
@@ -41,7 +55,7 @@ type RiskManager interface {
 }
 
 type Executor interface {
-	Init(bus *core.EventBus)
+	Init(bus *core.EventBus, ctx context.Context)
 	Execute(orders []OrderIntent)
 }
 
@@ -71,7 +85,7 @@ type Engine struct {
 	StateStore     store.StateStore
 
 	ticks             atomic.Uint64
-	marketEvents      atomic.Uint64
+	inputEvents       atomic.Uint64
 	executionEvents   atomic.Uint64
 	executionAccepted atomic.Uint64
 	executionFilled   atomic.Uint64
@@ -98,6 +112,6 @@ type OrderIntent struct {
 	MarketID string
 	TokenID  string
 	Price    float64
-	Side     string
+	Side     model.Side
 	Size     float64
 }
