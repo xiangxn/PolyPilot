@@ -429,7 +429,11 @@ func (e *Engine) restoreFromStore() {
 
 		e.State.Restore(state.Snapshot{
 			Position: state.Position{Tokens: make(map[string]state.TokenPosition)},
-			Balance:  state.Balance{Available: snapshotRec.Available, Reserved: snapshotRec.Reserved},
+			Balance: state.Balance{
+				Available:  snapshotRec.Available,
+				Reserved:   snapshotRec.Reserved,
+				MinBalance: snapshotRec.MinBalance,
+			},
 		}, reservations)
 		e.restoreOpenOrdersTracking(openOrders)
 		return
@@ -462,9 +466,10 @@ func (e *Engine) saveStateSnapshot(now time.Time) {
 	}
 	snap := e.State.Snapshot()
 	rec := store.SnapshotRecord{
-		Available: snap.Balance.Available,
-		Reserved:  snap.Balance.Reserved,
-		At:        now.UnixNano(),
+		Available:  snap.Balance.Available,
+		Reserved:   snap.Balance.Reserved,
+		MinBalance: snap.Balance.MinBalance,
+		At:         now.UnixNano(),
 	}
 	if err := e.StateStore.SaveSnapshot(rec); err != nil {
 		e.publishRisk(fmt.Sprintf("save snapshot failed reason=%s", err.Error()))

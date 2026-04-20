@@ -20,8 +20,9 @@ type Position struct {
 }
 
 type Balance struct {
-	Available float64
-	Reserved  float64
+	Available  float64
+	Reserved   float64
+	MinBalance float64
 }
 
 type Snapshot struct {
@@ -52,37 +53,29 @@ type State struct {
 	mu             sync.RWMutex
 	position       Position
 	balance        Balance
-	minBalance     float64
 	reservations   map[string]orderReservation
 	balanceSync    BalanceSyncConfig
 	balanceSyncRun sync.Once
 }
 
-func NewState(minBalance float64, opts ...Option) *State {
+func NewState(balanceSync BalanceSyncConfig) *State {
+	return NewStateWithInitialAvailable(balanceSync.MinBalance, 0, balanceSync)
+}
+
+func NewStateWithInitialAvailable(minBalance, initialAvailable float64, balanceSync BalanceSyncConfig) *State {
 	if minBalance < 0 {
 		minBalance = 0
 	}
-	s := &State{
-		position:     Position{Tokens: make(map[string]TokenPosition)},
-		balance:      Balance{Available: 0, Reserved: 0},
-		minBalance:   minBalance,
-		reservations: make(map[string]orderReservation),
-	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(s)
-		}
-	}
-	if s.balanceSync.Enabled {
-		if s.balanceSync.Interval <= 0 {
-			s.balanceSync.Interval = defaultBalanceSyncInterval
-		}
-		if s.balanceSync.Epsilon <= 0 {
-			s.balanceSync.Epsilon = defaultBalanceSyncEpsilon
-		}
+	if initialAvailable < 0 {
+		initialAvailable = 0
 	}
 
-	return s
+	return &State{
+		position:     Position{Tokens: make(map[string]TokenPosition)},
+		balance:      Balance{Available: initialAvailable, Reserved: 0, MinBalance: minBalance},
+		reservations: make(map[string]orderReservation),
+		balanceSync:  normalizeBalanceSyncConfig(balanceSync),
+	}
 }
 
 func (s *State) Snapshot() Snapshot {
@@ -108,7 +101,7 @@ func (s *State) Restore(snapshot Snapshot, reservations []ReservationSnapshot) {
 		s.position.Tokens = make(map[string]TokenPosition)
 	}
 
-	s.balance = Balance{Available: snapshot.Balance.Available, Reserved: 0}
+	s.balance = Balance{Available: snapshot.Balance.Available, Reserved: 0, MinBalance: snapshot.Balance.MinBalance}
 	s.reservations = make(map[string]orderReservation, len(reservations))
 	for _, r := range reservations {
 		if r.OrderID == "" {
@@ -172,14 +165,8 @@ func (s *State) ReserveOrder(orderID, marketID, tokenID string, side model.Side,
 
 	s.ensureTokenPositions()
 	if side == model.BUY {
-		if s.balance.Available <= s.minBalance+floatEpsilon {
-			return errors.New("available balance reached minimum reserve")
-		}
 		if s.balance.Available+floatEpsilon < reservedAmount {
 			return errors.New("insufficient available balance for reserve")
-		}
-		if s.balance.Available-reservedAmount <= s.minBalance+floatEpsilon {
-			return errors.New("order would reduce available balance below minimum reserve")
 		}
 		s.balance.Available -= reservedAmount
 		s.balance.Reserved += reservedAmount

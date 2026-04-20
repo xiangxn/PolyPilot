@@ -25,10 +25,11 @@ type TokenPositionRecord struct {
 }
 
 type SnapshotRecord struct {
-	Available float64
-	Reserved  float64
-	Tokens    map[string]TokenPositionRecord
-	At        int64
+	Available  float64
+	Reserved   float64
+	MinBalance float64
+	Tokens     map[string]TokenPositionRecord
+	At         int64
 }
 
 type OrderStore interface {

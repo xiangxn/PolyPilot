@@ -63,8 +63,9 @@ func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
 	}
 
 	if err := stateStore.SaveSnapshot(SnapshotRecord{
-		Available: 90,
-		Reserved:  10,
+		Available:  90,
+		Reserved:   10,
+		MinBalance: 12,
 		Tokens: map[string]TokenPositionRecord{
 			"token-1": {Available: 2, Reserved: 1},
 		},
@@ -79,7 +80,7 @@ func TestSQLiteStores_BasicRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected snapshot exists")
 	}
-	if rec.Available != 90 || rec.Reserved != 10 {
+	if rec.Available != 90 || rec.Reserved != 10 || rec.MinBalance != 12 {
 		t.Fatalf("unexpected snapshot basics: %+v", rec)
 	}
 	tp, exists := rec.Tokens["token-1"]

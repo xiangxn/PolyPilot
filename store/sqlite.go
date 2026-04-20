@@ -72,6 +72,7 @@ func migrateSQLite(db *sql.DB) error {
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			available REAL,
 			reserved REAL,
+			minbalance REAL DEFAULT 0,
 			tokens TEXT,
 			at INTEGER
 		);`,
@@ -179,23 +180,24 @@ func (s *SQLiteStateStore) SaveSnapshot(snapshot SnapshotRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO state_snapshot (id, available, reserved, tokens, at)
-		VALUES (1, ?, ?, ?, ?)
+	_, err = s.db.Exec(`INSERT INTO state_snapshot (id, available, reserved, minbalance, tokens, at)
+		VALUES (1, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			available=excluded.available,
 			reserved=excluded.reserved,
+			minbalance=excluded.minbalance,
 			tokens=excluded.tokens,
 			at=excluded.at`,
-		snapshot.Available, snapshot.Reserved, string(tokensJSON), snapshot.At,
+		snapshot.Available, snapshot.Reserved, snapshot.MinBalance, string(tokensJSON), snapshot.At,
 	)
 	return err
 }
 
 func (s *SQLiteStateStore) LoadLatestSnapshot() (SnapshotRecord, bool, error) {
-	row := s.db.QueryRow(`SELECT available, reserved, tokens, at FROM state_snapshot WHERE id = 1`)
+	row := s.db.QueryRow(`SELECT available, reserved, minbalance, tokens, at FROM state_snapshot WHERE id = 1`)
 	var rec SnapshotRecord
 	var tokensJSON sql.NullString
-	err := row.Scan(&rec.Available, &rec.Reserved, &tokensJSON, &rec.At)
+	err := row.Scan(&rec.Available, &rec.Reserved, &rec.MinBalance, &tokensJSON, &rec.At)
 	if err == sql.ErrNoRows {
 		return SnapshotRecord{}, false, nil
 	}

@@ -18,7 +18,7 @@ func almostEqual(a, b float64) bool {
 func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 	e := &Engine{
 		Bus:   core.NewEventBus(),
-		State: state.NewState(0, state.WithInitialAvailable(100)),
+		State: state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{}),
 	}
 	e.initOrderTracking()
 
@@ -77,7 +77,7 @@ func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 func TestCleanupExpiredPending(t *testing.T) {
 	e := &Engine{
 		Bus:             core.NewEventBus(),
-		State:           state.NewState(0, state.WithInitialAvailable(100)),
+		State:           state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{}),
 		PendingEventTTL: 1 * time.Second,
 	}
 	e.initOrderTracking()
@@ -112,7 +112,7 @@ func TestCleanupExpiredPending(t *testing.T) {
 func TestCleanupExpiredFinalized(t *testing.T) {
 	e := &Engine{
 		Bus:               core.NewEventBus(),
-		State:             state.NewState(0, state.WithInitialAvailable(100)),
+		State:             state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{}),
 		FinalizedOrderTTL: 1 * time.Second,
 	}
 	e.initOrderTracking()
@@ -140,9 +140,10 @@ func TestRestoreFromStore_SnapshotAndOpenOrders(t *testing.T) {
 	stateStore := store.NewMemoryStateStore()
 
 	_ = stateStore.SaveSnapshot(store.SnapshotRecord{
-		Available: 80,
-		Reserved:  20,
-		At:        time.Now().UnixNano(),
+		Available:  80,
+		Reserved:   20,
+		MinBalance: 15,
+		At:         time.Now().UnixNano(),
 	})
 	_ = orderStore.UpsertOrder(store.OrderRecord{
 		OrderID:       "ord-open-buy",
@@ -171,7 +172,7 @@ func TestRestoreFromStore_SnapshotAndOpenOrders(t *testing.T) {
 
 	e := &Engine{
 		Bus:        core.NewEventBus(),
-		State:      state.NewState(0, state.WithInitialAvailable(100)),
+		State:      state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{}),
 		OrderStore: orderStore,
 		StateStore: stateStore,
 	}
@@ -184,6 +185,9 @@ func TestRestoreFromStore_SnapshotAndOpenOrders(t *testing.T) {
 	}
 	if !almostEqual(snap.Balance.Reserved, 5) {
 		t.Fatalf("reserved cash should be rebuilt from BUY open orders, got %+v", snap.Balance)
+	}
+	if !almostEqual(snap.Balance.MinBalance, 15) {
+		t.Fatalf("min balance should be restored from snapshot, got %+v", snap.Balance)
 	}
 	tp2 := snap.Position.Tokens["token-2"]
 	if !almostEqual(tp2.Reserved, 4) {
@@ -289,7 +293,7 @@ func TestUpsertOrderRecord_Lifecycle_SellAndNegativeFill(t *testing.T) {
 
 func TestSaveStateSnapshot(t *testing.T) {
 	stateStore := store.NewMemoryStateStore()
-	s := state.NewState(0, state.WithInitialAvailable(100))
+	s := state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{})
 	if err := s.ReserveOrder("ord-save", "market-1", "token-1", model.BUY, 0.5, 10); err != nil {
 		t.Fatalf("reserve failed: %v", err)
 	}
@@ -311,7 +315,7 @@ func TestSaveStateSnapshot(t *testing.T) {
 }
 
 func TestHandleExecutionEvent_CancelledAndRejected(t *testing.T) {
-	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(0, state.WithInitialAvailable(100))}
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{})}
 	e.initOrderTracking()
 
 	e.handleExecutionEvent(core.ExecutionEvent{
@@ -386,7 +390,7 @@ func TestRestoreFromStore_ExecutionLogPath(t *testing.T) {
 		At:         now.Add(time.Millisecond),
 	})
 
-	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(0, state.WithInitialAvailable(100)), ExecutionStore: execStore}
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{}), ExecutionStore: execStore}
 	e.initOrderTracking()
 	e.restoreFromStore()
 
@@ -401,7 +405,7 @@ func TestRestoreFromStore_ExecutionLogPath(t *testing.T) {
 }
 
 func TestPublishRiskAndMetrics(t *testing.T) {
-	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(0, state.WithInitialAvailable(100))}
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{})}
 	e.initOrderTracking()
 
 	ch, cancel := e.Bus.SubscribeWithCancel()
@@ -431,7 +435,7 @@ func TestPublishRiskAndMetrics(t *testing.T) {
 func TestCleanupTrackingAndPendingCount(t *testing.T) {
 	e := &Engine{
 		Bus:               core.NewEventBus(),
-		State:             state.NewState(0, state.WithInitialAvailable(100)),
+		State:             state.NewStateWithInitialAvailable(0, 100, state.BalanceSyncConfig{}),
 		PendingEventTTL:   1 * time.Second,
 		FinalizedOrderTTL: 1 * time.Second,
 	}

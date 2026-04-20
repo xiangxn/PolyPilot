@@ -32,29 +32,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	stateOpts := make([]state.Option, 0, 1)
-	if cfg.BalanceSync.Enabled {
-		reader, err := state.NewMulticallBalanceReader(
-			cfg.ChainRPCURL,
-			cfg.Polymarket.ChainID,
-			cfg.BalanceSync.CollateralToken,
-			*cfg.Polymarket.FunderAddress,
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "invalid balance sync config: %v\n", err)
-			return
-		}
-
-		stateOpts = append(stateOpts, state.WithBalanceSync(state.BalanceSyncConfig{
-			Enabled:  true,
-			Reader:   reader,
-			Interval: cfg.BalanceSync.Interval,
-			Epsilon:  cfg.BalanceSync.Epsilon,
-		}))
+	balanceSyncCfg, err := state.BuildMulticallBalanceSyncConfig(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "init state failed: %v\n", err)
+		return
 	}
 
 	engine := &runtime.Engine{
-		State:      state.NewState(cfg.BalanceSync.MinBalance, stateOpts...),
+		State:      state.NewState(balanceSyncCfg),
 		Risk:       &risk.Engine{},
 		Exec:       &execution.Executor{},
 		SQLitePath: cfg.SQLitePath,

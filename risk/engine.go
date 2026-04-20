@@ -3,21 +3,25 @@ package risk
 import (
 	"errors"
 	"fmt"
-	"math"
 	"polypilot/runtime"
 	"polypilot/state"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
-type Engine struct{}
+const floatEpsilon = 1e-9
+
+type Engine struct {
+}
 
 func (r *Engine) Check(orders []runtime.OrderIntent, s state.Snapshot) error {
 	if len(orders) == 0 {
 		return nil
 	}
 
-	var required float64
+	var buyRequired float64
+	sellRequiredByToken := make(map[string]float64)
+
 	for _, o := range orders {
 		if o.MarketID == "" {
 			return errors.New("invalid market id")
@@ -32,23 +36,36 @@ func (r *Engine) Check(orders []runtime.OrderIntent, s state.Snapshot) error {
 			return errors.New("invalid order price")
 		}
 
-		required += requiredCollateral(o.Side, o.Price, o.Size)
+		switch o.Side {
+		case model.BUY:
+			buyRequired += requiredCollateral(o.Side, o.Price, o.Size)
+		case model.SELL:
+			sellRequiredByToken[o.TokenID] += requiredCollateral(o.Side, o.Price, o.Size)
+		default:
+			return errors.New("invalid order side")
+		}
 	}
 
-	if s.Balance.Available < required {
-		return fmt.Errorf("insufficient available balance: need %.2f, have %.2f", required, s.Balance.Available)
+	if buyRequired > 0 {
+		if s.Balance.Available <= s.Balance.MinBalance+floatEpsilon {
+			return fmt.Errorf("available balance reached minimum reserve: min %.2f, have %.2f", s.Balance.MinBalance, s.Balance.Available)
+		}
+		if s.Balance.Available+floatEpsilon < buyRequired {
+			return fmt.Errorf("insufficient available balance: need %.2f, have %.2f", buyRequired, s.Balance.Available)
+		}
+		if s.Balance.Available-buyRequired <= s.Balance.MinBalance+floatEpsilon {
+			return fmt.Errorf("order would reduce available balance below minimum reserve: min %.2f, post-order %.2f", s.Balance.MinBalance, s.Balance.Available-buyRequired)
+		}
+	}
+
+	for tokenID, requiredSize := range sellRequiredByToken {
+		available := s.Position.Tokens[tokenID].Available
+		if available < requiredSize {
+			return fmt.Errorf("insufficient token position for sell: token=%s need %.4f, have %.4f", tokenID, requiredSize, available)
+		}
 	}
 
 	return nil
-}
-
-func isTickAligned(price, tick float64) bool {
-	if tick <= 0 {
-		return true
-	}
-	steps := math.Round(price / tick)
-	aligned := steps * tick
-	return math.Abs(price-aligned) <= 1e-9
 }
 
 func requiredCollateral(side model.Side, price, size float64) float64 {
@@ -56,7 +73,7 @@ func requiredCollateral(side model.Side, price, size float64) float64 {
 	case model.BUY:
 		return size * price
 	case model.SELL:
-		return 0
+		return size
 	default:
 		return 0
 	}

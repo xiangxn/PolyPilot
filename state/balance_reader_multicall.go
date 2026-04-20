@@ -3,7 +3,9 @@ package state
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
+	appconfig "polypilot/internal/config"
 	utils "polypilot/internal/multicall"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -21,11 +23,14 @@ func NewMulticallBalanceReader(rpcURL string, chainID *big.Int, tokenHex, wallet
 	if rpcURL == "" || tokenHex == "" || walletHex == "" {
 		return nil, errors.New("missing multicall balance reader config")
 	}
+	if chainID == nil {
+		return nil, errors.New("missing chain id")
+	}
 	if !common.IsHexAddress(tokenHex) {
 		return nil, errors.New("invalid collateral token address")
 	}
 	if !common.IsHexAddress(walletHex) {
-		return nil, errors.New("invalid wallet address")
+		return nil, errors.New("invalid funder address")
 	}
 
 	return &MulticallBalanceReader{
@@ -33,6 +38,33 @@ func NewMulticallBalanceReader(rpcURL string, chainID *big.Int, tokenHex, wallet
 		chain:  chainID.Int64(),
 		token:  common.HexToAddress(tokenHex),
 		wallet: common.HexToAddress(walletHex),
+	}, nil
+}
+
+func BuildMulticallBalanceSyncConfig(cfg appconfig.Config) (BalanceSyncConfig, error) {
+	if !cfg.BalanceSync.Enabled {
+		return BalanceSyncConfig{}, nil
+	}
+	if cfg.Polymarket.FunderAddress == nil || *cfg.Polymarket.FunderAddress == "" {
+		return BalanceSyncConfig{}, errors.New("missing polymarket funder address")
+	}
+
+	reader, err := NewMulticallBalanceReader(
+		cfg.ChainRPCURL,
+		cfg.Polymarket.ChainID,
+		cfg.BalanceSync.CollateralToken,
+		*cfg.Polymarket.FunderAddress,
+	)
+	if err != nil {
+		return BalanceSyncConfig{}, fmt.Errorf("invalid balance sync config: %w", err)
+	}
+
+	return BalanceSyncConfig{
+		Enabled:    true,
+		Reader:     reader,
+		Interval:   cfg.BalanceSync.Interval,
+		Epsilon:    cfg.BalanceSync.Epsilon,
+		MinBalance: cfg.BalanceSync.MinBalance,
 	}, nil
 }
 

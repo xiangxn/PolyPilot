@@ -22,28 +22,25 @@ type BalanceSyncEvent struct {
 }
 
 type BalanceSyncConfig struct {
-	Enabled  bool
-	Reader   BalanceReader
-	Interval time.Duration
-	Epsilon  float64
-	OnEvent  func(BalanceSyncEvent)
+	Enabled    bool
+	Reader     BalanceReader
+	Interval   time.Duration
+	Epsilon    float64
+	MinBalance float64
+	OnEvent    func(BalanceSyncEvent)
 }
 
-type Option func(*State)
-
-func WithBalanceSync(cfg BalanceSyncConfig) Option {
-	return func(s *State) {
-		s.balanceSync = cfg
+func normalizeBalanceSyncConfig(cfg BalanceSyncConfig) BalanceSyncConfig {
+	if !cfg.Enabled {
+		return cfg
 	}
-}
-
-func WithInitialAvailable(v float64) Option {
-	return func(s *State) {
-		if v < 0 {
-			v = 0
-		}
-		s.balance.Available = v
+	if cfg.Interval <= 0 {
+		cfg.Interval = defaultBalanceSyncInterval
 	}
+	if cfg.Epsilon <= 0 {
+		cfg.Epsilon = defaultBalanceSyncEpsilon
+	}
+	return cfg
 }
 
 func (s *State) StartBalanceSync(ctx context.Context) {

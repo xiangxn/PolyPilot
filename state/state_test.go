@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/big"
+	appconfig "polypilot/internal/config"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +18,7 @@ func almostEqual(a, b float64) bool {
 }
 
 func TestState_BuyOrderLifecycle(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(Snapshot{Balance: Balance{Available: 100, Reserved: 0}}, nil)
 	orderID := "ord-buy-1"
 
@@ -56,7 +58,7 @@ func TestState_BuyOrderLifecycle(t *testing.T) {
 }
 
 func TestState_SellOrderLifecycle(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(Snapshot{
 		Position: Position{Tokens: map[string]TokenPosition{
 			"token-1": {Available: 5, Reserved: 0},
@@ -100,14 +102,14 @@ func TestState_SellOrderLifecycle(t *testing.T) {
 }
 
 func TestState_SellReserveInsufficientPosition(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	if err := s.ReserveOrder("ord-sell-insufficient", "market-1", "token-1", model.SELL, 0.5, 1); err == nil {
 		t.Fatalf("expected insufficient token position error")
 	}
 }
 
 func TestState_ApplyFillMismatchAndBounds(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(Snapshot{Balance: Balance{Available: 100, Reserved: 0}}, nil)
 	orderID := "ord-apply-1"
 	if err := s.ReserveOrder(orderID, "market-1", "token-1", model.BUY, 0.5, 2); err != nil {
@@ -129,7 +131,7 @@ func TestState_ApplyFillMismatchAndBounds(t *testing.T) {
 }
 
 func TestState_RestoreRebuildsReservedFromReservations(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(
 		Snapshot{
 			Position: Position{Tokens: map[string]TokenPosition{
@@ -180,7 +182,7 @@ func TestState_RestoreRebuildsReservedFromReservations(t *testing.T) {
 }
 
 func TestState_SnapshotReturnsDeepCopy(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(Snapshot{
 		Position: Position{Tokens: map[string]TokenPosition{
 			"token-1": {Available: 1, Reserved: 2},
@@ -199,7 +201,7 @@ func TestState_SnapshotReturnsDeepCopy(t *testing.T) {
 }
 
 func TestState_InputValidation(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 
 	if err := s.ReserveOrder("", "m", "t", model.BUY, 0.5, 1); err == nil {
 		t.Fatalf("expected empty order id error")
@@ -228,26 +230,26 @@ func TestState_InputValidation(t *testing.T) {
 	}
 }
 
-func TestState_MinBalanceBlocksReserve(t *testing.T) {
-	s := NewState(10)
+func TestState_MinBalanceDoesNotBlockReserve(t *testing.T) {
+	s := NewState(BalanceSyncConfig{MinBalance: 10})
 	s.Restore(Snapshot{Balance: Balance{Available: 10, Reserved: 0}}, nil)
-	if err := s.ReserveOrder("ord-min-1", "m", "t", model.BUY, 0.5, 1); err == nil {
-		t.Fatalf("expected min balance guard reject when available<=min")
+	if err := s.ReserveOrder("ord-min-1", "m", "t", model.BUY, 0.5, 1); err != nil {
+		t.Fatalf("expected reserve success even when available<=min: %v", err)
 	}
 
 	s.Restore(Snapshot{Balance: Balance{Available: 10.5, Reserved: 0}}, nil)
-	if err := s.ReserveOrder("ord-min-2", "m", "t", model.BUY, 0.5, 1); err == nil {
-		t.Fatalf("expected min balance guard reject when order drops available below min")
+	if err := s.ReserveOrder("ord-min-2", "m", "t", model.BUY, 0.5, 1); err != nil {
+		t.Fatalf("expected reserve success even when post-order available below min: %v", err)
 	}
 
-	s.Restore(Snapshot{Balance: Balance{Available: 11, Reserved: 0}}, nil)
-	if err := s.ReserveOrder("ord-min-3", "m", "t", model.BUY, 0.5, 1); err != nil {
-		t.Fatalf("expected reserve success when post-order available stays above min: %v", err)
+	s.Restore(Snapshot{Balance: Balance{Available: 0.4, Reserved: 0}}, nil)
+	if err := s.ReserveOrder("ord-min-3", "m", "t", model.BUY, 0.5, 1); err == nil {
+		t.Fatalf("expected reserve reject when available collateral is insufficient")
 	}
 }
 
 func TestState_EdgeBranches(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(Snapshot{Balance: Balance{Available: 100, Reserved: 0}}, nil)
 
 	if err := s.ReserveOrder("ord-dup", "m", "t", model.BUY, 0.5, 1); err != nil {
@@ -277,7 +279,7 @@ func TestState_EdgeBranches(t *testing.T) {
 }
 
 func TestState_RestoreInvalidRowsAndConsumedClamp(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(
 		Snapshot{Balance: Balance{Available: 50, Reserved: 999}},
 		[]ReservationSnapshot{
@@ -306,7 +308,7 @@ func TestState_RestoreInvalidRowsAndConsumedClamp(t *testing.T) {
 }
 
 func TestState_ReconcileOnchainBalance(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(Snapshot{Balance: Balance{Available: 20, Reserved: 0}}, nil)
 	if err := s.ReserveOrder("ord-reconcile", "market-1", "token-1", model.BUY, 0.3, 10); err != nil {
 		t.Fatalf("reserve failed: %v", err)
@@ -342,7 +344,7 @@ func TestState_ReconcileOnchainBalance(t *testing.T) {
 }
 
 func TestState_ReconcileOnchainBalance_Epsilon(t *testing.T) {
-	s := NewState(0)
+	s := NewState(BalanceSyncConfig{})
 	s.Restore(Snapshot{Balance: Balance{Available: 5, Reserved: 0}}, nil)
 	changed, drift := s.ReconcileOnchainBalance(5.0000000001, 1e-6)
 	if changed {
@@ -372,13 +374,13 @@ func TestState_SyncOnchainBalanceOnce_Error(t *testing.T) {
 	reader := &testBalanceReader{err: errors.New("rpc down")}
 	events := make([]BalanceSyncEvent, 0, 1)
 
-	s := NewState(100, WithBalanceSync(BalanceSyncConfig{
+	s := NewState(BalanceSyncConfig{MinBalance: 100,
 		Enabled: true,
 		Reader:  reader,
 		OnEvent: func(evt BalanceSyncEvent) {
 			events = append(events, evt)
 		},
-	}))
+	})
 
 	evt := s.SyncOnchainBalanceOnce(context.Background())
 	if evt.Err == nil {
@@ -394,12 +396,12 @@ func TestState_SyncOnchainBalanceOnce_Error(t *testing.T) {
 
 func TestState_StartBalanceSync_CancelStops(t *testing.T) {
 	reader := &testBalanceReader{balance: 100}
-	s := NewState(100, WithBalanceSync(BalanceSyncConfig{
+	s := NewState(BalanceSyncConfig{MinBalance: 100,
 		Enabled:  true,
 		Reader:   reader,
 		Interval: 10 * time.Millisecond,
 		Epsilon:  1e-9,
-	}))
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.StartBalanceSync(ctx)
@@ -426,5 +428,66 @@ func TestRequiredCollateral(t *testing.T) {
 	}
 	if !almostEqual(requiredCollateral(model.Side(99), 0.6, 10), 0) {
 		t.Fatalf("unknown side collateral should be 0")
+	}
+}
+
+func TestBuildMulticallBalanceSyncConfig_Disabled(t *testing.T) {
+	cfg, err := BuildMulticallBalanceSyncConfig(appconfig.Config{})
+	if err != nil {
+		t.Fatalf("disabled config should not error: %v", err)
+	}
+	if cfg.Enabled {
+		t.Fatalf("disabled config should keep disabled")
+	}
+}
+
+func TestBuildMulticallBalanceSyncConfig_MissingFunder(t *testing.T) {
+	_, err := BuildMulticallBalanceSyncConfig(appconfig.Config{
+		BalanceSync: appconfig.BalanceSyncConfig{Enabled: true},
+	})
+	if err == nil {
+		t.Fatalf("expected missing funder address error")
+	}
+}
+
+func TestBuildMulticallBalanceSyncConfig_SetsMinBalance(t *testing.T) {
+	funder := "0x1111111111111111111111111111111111111111"
+	cfg, err := BuildMulticallBalanceSyncConfig(appconfig.Config{
+		ChainRPCURL: "https://polygon.drpc.org",
+		BalanceSync: appconfig.BalanceSyncConfig{
+			Enabled:         true,
+			MinBalance:      12.5,
+			Interval:        3 * time.Second,
+			Epsilon:         1e-5,
+			CollateralToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+		},
+		Polymarket: appconfig.Config{}.Polymarket,
+	})
+	if err == nil {
+		t.Fatalf("expected invalid config because chain/funder is missing")
+	}
+
+	pmCfg := appconfig.Config{}.Polymarket
+	pmCfg.ChainID = big.NewInt(137)
+	pmCfg.FunderAddress = &funder
+	cfg, err = BuildMulticallBalanceSyncConfig(appconfig.Config{
+		ChainRPCURL: "https://polygon.drpc.org",
+		BalanceSync: appconfig.BalanceSyncConfig{
+			Enabled:         true,
+			MinBalance:      12.5,
+			Interval:        3 * time.Second,
+			Epsilon:         1e-5,
+			CollateralToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+		},
+		Polymarket: pmCfg,
+	})
+	if err != nil {
+		t.Fatalf("build config failed: %v", err)
+	}
+	if !cfg.Enabled || cfg.Reader == nil {
+		t.Fatalf("expected enabled config with reader")
+	}
+	if !almostEqual(cfg.MinBalance, 12.5) {
+		t.Fatalf("expected min balance propagated, got %.6f", cfg.MinBalance)
 	}
 }
