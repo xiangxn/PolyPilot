@@ -18,7 +18,7 @@ func almostEqual(a, b float64) bool {
 func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 	e := &Engine{
 		Bus:   core.NewEventBus(),
-		State: state.NewState(100),
+		State: state.NewState(0, state.WithInitialAvailable(100)),
 	}
 	e.initOrderTracking()
 
@@ -77,7 +77,7 @@ func TestHandleExecutionEvent_FilledBeforeAccepted(t *testing.T) {
 func TestCleanupExpiredPending(t *testing.T) {
 	e := &Engine{
 		Bus:             core.NewEventBus(),
-		State:           state.NewState(100),
+		State:           state.NewState(0, state.WithInitialAvailable(100)),
 		PendingEventTTL: 1 * time.Second,
 	}
 	e.initOrderTracking()
@@ -112,7 +112,7 @@ func TestCleanupExpiredPending(t *testing.T) {
 func TestCleanupExpiredFinalized(t *testing.T) {
 	e := &Engine{
 		Bus:               core.NewEventBus(),
-		State:             state.NewState(100),
+		State:             state.NewState(0, state.WithInitialAvailable(100)),
 		FinalizedOrderTTL: 1 * time.Second,
 	}
 	e.initOrderTracking()
@@ -171,7 +171,7 @@ func TestRestoreFromStore_SnapshotAndOpenOrders(t *testing.T) {
 
 	e := &Engine{
 		Bus:        core.NewEventBus(),
-		State:      state.NewState(100),
+		State:      state.NewState(0, state.WithInitialAvailable(100)),
 		OrderStore: orderStore,
 		StateStore: stateStore,
 	}
@@ -289,7 +289,7 @@ func TestUpsertOrderRecord_Lifecycle_SellAndNegativeFill(t *testing.T) {
 
 func TestSaveStateSnapshot(t *testing.T) {
 	stateStore := store.NewMemoryStateStore()
-	s := state.NewState(100)
+	s := state.NewState(0, state.WithInitialAvailable(100))
 	if err := s.ReserveOrder("ord-save", "market-1", "token-1", model.BUY, 0.5, 10); err != nil {
 		t.Fatalf("reserve failed: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestSaveStateSnapshot(t *testing.T) {
 }
 
 func TestHandleExecutionEvent_CancelledAndRejected(t *testing.T) {
-	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(100)}
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(0, state.WithInitialAvailable(100))}
 	e.initOrderTracking()
 
 	e.handleExecutionEvent(core.ExecutionEvent{
@@ -386,7 +386,7 @@ func TestRestoreFromStore_ExecutionLogPath(t *testing.T) {
 		At:         now.Add(time.Millisecond),
 	})
 
-	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(100), ExecutionStore: execStore}
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(0, state.WithInitialAvailable(100)), ExecutionStore: execStore}
 	e.initOrderTracking()
 	e.restoreFromStore()
 
@@ -401,7 +401,7 @@ func TestRestoreFromStore_ExecutionLogPath(t *testing.T) {
 }
 
 func TestPublishRiskAndMetrics(t *testing.T) {
-	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(100)}
+	e := &Engine{Bus: core.NewEventBus(), State: state.NewState(0, state.WithInitialAvailable(100))}
 	e.initOrderTracking()
 
 	ch, cancel := e.Bus.SubscribeWithCancel()
@@ -431,7 +431,7 @@ func TestPublishRiskAndMetrics(t *testing.T) {
 func TestCleanupTrackingAndPendingCount(t *testing.T) {
 	e := &Engine{
 		Bus:               core.NewEventBus(),
-		State:             state.NewState(100),
+		State:             state.NewState(0, state.WithInitialAvailable(100)),
 		PendingEventTTL:   1 * time.Second,
 		FinalizedOrderTTL: 1 * time.Second,
 	}

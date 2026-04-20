@@ -6,6 +6,7 @@ import (
 	"polypilot/core"
 	"time"
 
+	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
 )
 
@@ -42,13 +43,17 @@ func (l *Logger) logEvent(e core.Event) {
 		log.Printf("[observer logger] event=%s question=%s endDate=%s", e.Type, data.Get("question").String(), data.Get("endDate").String())
 	case core.EventExecution:
 		data := e.Data.(core.ExecutionEvent)
+		side := "BUY"
+		if data.Side == model.SELL {
+			side = "SELL"
+		}
 		log.Printf("[observer logger] event=%s order_id=%s market_id=%s token_id=%s status=%s side=%s price=%.4f req=%.2f filled=%.2f reason=%q at=%s",
 			e.Type,
 			data.OrderID,
 			data.MarketID,
 			data.TokenID,
 			data.Status,
-			data.Side,
+			side,
 			data.Price,
 			data.RequestedSize,
 			data.FilledSize,

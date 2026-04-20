@@ -49,18 +49,40 @@ type orderReservation struct {
 }
 
 type State struct {
-	mu           sync.RWMutex
-	position     Position
-	balance      Balance
-	reservations map[string]orderReservation
+	mu             sync.RWMutex
+	position       Position
+	balance        Balance
+	minBalance     float64
+	reservations   map[string]orderReservation
+	balanceSync    BalanceSyncConfig
+	balanceSyncRun sync.Once
 }
 
-func NewState(initialAvailable float64) *State {
-	return &State{
+func NewState(minBalance float64, opts ...Option) *State {
+	if minBalance < 0 {
+		minBalance = 0
+	}
+	s := &State{
 		position:     Position{Tokens: make(map[string]TokenPosition)},
-		balance:      Balance{Available: initialAvailable, Reserved: 0},
+		balance:      Balance{Available: 0, Reserved: 0},
+		minBalance:   minBalance,
 		reservations: make(map[string]orderReservation),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	if s.balanceSync.Enabled {
+		if s.balanceSync.Interval <= 0 {
+			s.balanceSync.Interval = defaultBalanceSyncInterval
+		}
+		if s.balanceSync.Epsilon <= 0 {
+			s.balanceSync.Epsilon = defaultBalanceSyncEpsilon
+		}
+	}
+
+	return s
 }
 
 func (s *State) Snapshot() Snapshot {
@@ -150,8 +172,14 @@ func (s *State) ReserveOrder(orderID, marketID, tokenID string, side model.Side,
 
 	s.ensureTokenPositions()
 	if side == model.BUY {
+		if s.balance.Available <= s.minBalance+floatEpsilon {
+			return errors.New("available balance reached minimum reserve")
+		}
 		if s.balance.Available+floatEpsilon < reservedAmount {
 			return errors.New("insufficient available balance for reserve")
+		}
+		if s.balance.Available-reservedAmount <= s.minBalance+floatEpsilon {
+			return errors.New("order would reduce available balance below minimum reserve")
 		}
 		s.balance.Available -= reservedAmount
 		s.balance.Reserved += reservedAmount
@@ -290,6 +318,34 @@ func (s *State) ReleaseOrder(orderID string) {
 	}
 
 	delete(s.reservations, orderID)
+}
+
+func (s *State) ReconcileOnchainBalance(onchainTotal float64, epsilon float64) (changed bool, drift float64) {
+	if onchainTotal < 0 {
+		onchainTotal = 0
+	}
+	if epsilon < 0 {
+		epsilon = 0
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	newAvailable := onchainTotal - s.balance.Reserved
+	if newAvailable < 0 {
+		newAvailable = 0
+	}
+
+	drift = newAvailable - s.balance.Available
+	if drift < 0 {
+		drift = -drift
+	}
+	if drift <= epsilon {
+		return false, drift
+	}
+
+	s.balance.Available = newAvailable
+	return true, drift
 }
 
 func requiredCollateral(side model.Side, price, size float64) float64 {

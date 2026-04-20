@@ -30,6 +30,7 @@ func (e *Engine) Start(ctx context.Context) {
 		return
 	}
 	e.restoreFromStore()
+	e.State.StartBalanceSync(ctx)
 
 	for _, ob := range e.Observers {
 		if ob == nil {

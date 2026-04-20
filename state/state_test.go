@@ -1,8 +1,12 @@
 package state
 
 import (
+	"context"
+	"errors"
 	"math"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 )
@@ -12,7 +16,8 @@ func almostEqual(a, b float64) bool {
 }
 
 func TestState_BuyOrderLifecycle(t *testing.T) {
-	s := NewState(100)
+	s := NewState(0)
+	s.Restore(Snapshot{Balance: Balance{Available: 100, Reserved: 0}}, nil)
 	orderID := "ord-buy-1"
 
 	if err := s.ReserveOrder(orderID, "market-1", "token-1", model.BUY, 0.6, 10); err != nil {
@@ -51,7 +56,7 @@ func TestState_BuyOrderLifecycle(t *testing.T) {
 }
 
 func TestState_SellOrderLifecycle(t *testing.T) {
-	s := NewState(10)
+	s := NewState(0)
 	s.Restore(Snapshot{
 		Position: Position{Tokens: map[string]TokenPosition{
 			"token-1": {Available: 5, Reserved: 0},
@@ -95,14 +100,15 @@ func TestState_SellOrderLifecycle(t *testing.T) {
 }
 
 func TestState_SellReserveInsufficientPosition(t *testing.T) {
-	s := NewState(100)
+	s := NewState(0)
 	if err := s.ReserveOrder("ord-sell-insufficient", "market-1", "token-1", model.SELL, 0.5, 1); err == nil {
 		t.Fatalf("expected insufficient token position error")
 	}
 }
 
 func TestState_ApplyFillMismatchAndBounds(t *testing.T) {
-	s := NewState(100)
+	s := NewState(0)
+	s.Restore(Snapshot{Balance: Balance{Available: 100, Reserved: 0}}, nil)
 	orderID := "ord-apply-1"
 	if err := s.ReserveOrder(orderID, "market-1", "token-1", model.BUY, 0.5, 2); err != nil {
 		t.Fatalf("reserve failed: %v", err)
@@ -193,7 +199,7 @@ func TestState_SnapshotReturnsDeepCopy(t *testing.T) {
 }
 
 func TestState_InputValidation(t *testing.T) {
-	s := NewState(100)
+	s := NewState(0)
 
 	if err := s.ReserveOrder("", "m", "t", model.BUY, 0.5, 1); err == nil {
 		t.Fatalf("expected empty order id error")
@@ -222,8 +228,27 @@ func TestState_InputValidation(t *testing.T) {
 	}
 }
 
+func TestState_MinBalanceBlocksReserve(t *testing.T) {
+	s := NewState(10)
+	s.Restore(Snapshot{Balance: Balance{Available: 10, Reserved: 0}}, nil)
+	if err := s.ReserveOrder("ord-min-1", "m", "t", model.BUY, 0.5, 1); err == nil {
+		t.Fatalf("expected min balance guard reject when available<=min")
+	}
+
+	s.Restore(Snapshot{Balance: Balance{Available: 10.5, Reserved: 0}}, nil)
+	if err := s.ReserveOrder("ord-min-2", "m", "t", model.BUY, 0.5, 1); err == nil {
+		t.Fatalf("expected min balance guard reject when order drops available below min")
+	}
+
+	s.Restore(Snapshot{Balance: Balance{Available: 11, Reserved: 0}}, nil)
+	if err := s.ReserveOrder("ord-min-3", "m", "t", model.BUY, 0.5, 1); err != nil {
+		t.Fatalf("expected reserve success when post-order available stays above min: %v", err)
+	}
+}
+
 func TestState_EdgeBranches(t *testing.T) {
-	s := NewState(100)
+	s := NewState(0)
+	s.Restore(Snapshot{Balance: Balance{Available: 100, Reserved: 0}}, nil)
 
 	if err := s.ReserveOrder("ord-dup", "m", "t", model.BUY, 0.5, 1); err != nil {
 		t.Fatalf("reserve failed: %v", err)
@@ -277,6 +302,118 @@ func TestState_RestoreInvalidRowsAndConsumedClamp(t *testing.T) {
 	snap2 := s.Snapshot()
 	if snap2.Balance.Reserved < -1e-9 {
 		t.Fatalf("reserved should not be negative, got %.6f", snap2.Balance.Reserved)
+	}
+}
+
+func TestState_ReconcileOnchainBalance(t *testing.T) {
+	s := NewState(0)
+	s.Restore(Snapshot{Balance: Balance{Available: 20, Reserved: 0}}, nil)
+	if err := s.ReserveOrder("ord-reconcile", "market-1", "token-1", model.BUY, 0.3, 10); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	changed, drift := s.ReconcileOnchainBalance(10, 1e-9)
+	if !changed {
+		t.Fatalf("expected balance reconcile changed=true")
+	}
+	if !almostEqual(drift, 10) {
+		t.Fatalf("unexpected drift: %.6f", drift)
+	}
+
+	snap := s.Snapshot()
+	if !almostEqual(snap.Balance.Available, 7) {
+		t.Fatalf("expected available=7 after reconcile, got %.6f", snap.Balance.Available)
+	}
+	if !almostEqual(snap.Balance.Reserved, 3) {
+		t.Fatalf("reserved should keep unchanged, got %.6f", snap.Balance.Reserved)
+	}
+
+	changed, _ = s.ReconcileOnchainBalance(2, 1e-9)
+	if !changed {
+		t.Fatalf("expected clamp reconcile changed=true")
+	}
+	snap = s.Snapshot()
+	if !almostEqual(snap.Balance.Available, 0) {
+		t.Fatalf("available should be clamped to 0, got %.6f", snap.Balance.Available)
+	}
+	if !almostEqual(snap.Balance.Reserved, 3) {
+		t.Fatalf("reserved should keep unchanged after clamp, got %.6f", snap.Balance.Reserved)
+	}
+}
+
+func TestState_ReconcileOnchainBalance_Epsilon(t *testing.T) {
+	s := NewState(0)
+	s.Restore(Snapshot{Balance: Balance{Available: 5, Reserved: 0}}, nil)
+	changed, drift := s.ReconcileOnchainBalance(5.0000000001, 1e-6)
+	if changed {
+		t.Fatalf("expected no change when drift <= epsilon")
+	}
+	if drift <= 0 {
+		t.Fatalf("expected positive drift")
+	}
+	snap := s.Snapshot()
+	if !almostEqual(snap.Balance.Available, 5) {
+		t.Fatalf("available should stay unchanged, got %.12f", snap.Balance.Available)
+	}
+}
+
+type testBalanceReader struct {
+	balance float64
+	err     error
+	calls   atomic.Int32
+}
+
+func (r *testBalanceReader) ReadOnchainBalance(ctx context.Context) (float64, error) {
+	r.calls.Add(1)
+	return r.balance, r.err
+}
+
+func TestState_SyncOnchainBalanceOnce_Error(t *testing.T) {
+	reader := &testBalanceReader{err: errors.New("rpc down")}
+	events := make([]BalanceSyncEvent, 0, 1)
+
+	s := NewState(100, WithBalanceSync(BalanceSyncConfig{
+		Enabled: true,
+		Reader:  reader,
+		OnEvent: func(evt BalanceSyncEvent) {
+			events = append(events, evt)
+		},
+	}))
+
+	evt := s.SyncOnchainBalanceOnce(context.Background())
+	if evt.Err == nil {
+		t.Fatalf("expected sync error")
+	}
+	if reader.calls.Load() != 1 {
+		t.Fatalf("reader should be called once")
+	}
+	if len(events) != 1 || events[0].Err == nil {
+		t.Fatalf("expected onEvent receive error event")
+	}
+}
+
+func TestState_StartBalanceSync_CancelStops(t *testing.T) {
+	reader := &testBalanceReader{balance: 100}
+	s := NewState(100, WithBalanceSync(BalanceSyncConfig{
+		Enabled:  true,
+		Reader:   reader,
+		Interval: 10 * time.Millisecond,
+		Epsilon:  1e-9,
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.StartBalanceSync(ctx)
+	time.Sleep(35 * time.Millisecond)
+	cancel()
+	before := reader.calls.Load()
+	time.Sleep(35 * time.Millisecond)
+	after := reader.calls.Load()
+
+	if before == 0 {
+		t.Fatalf("expected sync to run at least once")
+	}
+	if after > before {
+		t.Fatalf("expected sync to stop after cancel, before=%d after=%d", before, after)
 	}
 }
 
