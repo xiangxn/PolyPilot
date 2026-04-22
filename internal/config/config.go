@@ -16,7 +16,6 @@ import (
 )
 
 type Config struct {
-	SQLitePath  string               `mapstructure:"sqlite_path"`
 	SignerKey   string               `mapstructure:"signer_key"`
 	ChainRPCURL string               `mapstructure:"chain_rpc_url"`
 	BalanceSync BalanceSyncConfig    `mapstructure:"balance_sync"`
@@ -60,6 +59,9 @@ func Load() (Config, error) {
 
 	if err := decryptSensitiveFields(&cfg); err != nil {
 		return Config{}, err
+	}
+	if cfg.SignerKey != "" {
+		cfg.SignerKey = strings.TrimPrefix(strings.TrimSpace(cfg.SignerKey), "0x")
 	}
 
 	return cfg, nil

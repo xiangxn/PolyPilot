@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"polypilot/core"
 	"polypilot/execution"
 	appconfig "polypilot/internal/config"
 	"polypilot/market"
@@ -38,14 +39,21 @@ func main() {
 		return
 	}
 
+	sdkCfg := &sdk.Config{Polymarket: cfg.Polymarket}
+	signerKey := cfg.SignerKey
+	if signerKey == "" {
+		signerKey = core.DefaultReadonlyPrivKey
+	}
+	sharedClient := sdk.NewClient(signerKey, sdkCfg)
+
 	engine := &runtime.Engine{
-		State: state.NewState(balanceSyncCfg),
+		State: state.NewState(balanceSyncCfg, state.NewPolymarketStateClient(sharedClient, 0)),
 		Risk:  &risk.Engine{},
 		Exec: &execution.Executor{
-			Config:    &sdk.Config{Polymarket: cfg.Polymarket},
+			Client:    sharedClient,
+			Config:    sdkCfg,
 			SignerKey: cfg.SignerKey,
 		},
-		SQLitePath: cfg.SQLitePath,
 		Feeds: []runtime.Feed{&market.PolymarketSlugFeed{
 			SlugPrefix:    "btc-updown-5m",
 			WindowMinutes: 5,

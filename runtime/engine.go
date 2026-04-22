@@ -3,10 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"math"
 	"polypilot/core"
 	"polypilot/state"
-	"polypilot/store"
 	"time"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
@@ -15,8 +13,6 @@ import (
 const (
 	defaultPendingEventTTL   = 30 * time.Second
 	defaultFinalizedOrderTTL = 10 * time.Minute
-	defaultSnapshotInterval  = 10 * time.Second
-	defaultSQLitePath        = "data/polymarket.db"
 )
 
 func (e *Engine) Start(ctx context.Context) {
@@ -26,10 +22,14 @@ func (e *Engine) Start(ctx context.Context) {
 	e.Bus = core.NewEventBus()
 
 	e.initOrderTracking()
-	if !e.initStores() {
-		return
+	// 同步平台数据
+	restoredOrderIDs, restoreErr := e.State.RestoreFromExchange(ctx)
+	if restoreErr != nil {
+		e.publishRisk(fmt.Sprintf("restore from exchange failed reason=%s", restoreErr.Error()))
+	} else {
+		e.restoreOpenOrdersTrackingByIDs(restoredOrderIDs)
 	}
-	e.restoreFromStore()
+
 	e.State.StartBalanceSync(ctx)
 
 	for _, ob := range e.Observers {
@@ -80,13 +80,8 @@ func (e *Engine) Start(ctx context.Context) {
 						e.publishRisk("invalid execution event payload")
 						continue
 					}
-					if data.OrderID != "" && e.ExecutionStore != nil {
-						if err := e.ExecutionStore.AppendExecution(data); err != nil {
-							e.publishRisk(fmt.Sprintf("persist execution failed order=%s reason=%s", data.OrderID, err.Error()))
-						}
-					}
+
 					e.handleExecutionEvent(data, true)
-					e.upsertOrderRecord(data)
 				}
 			}
 		}
@@ -101,23 +96,18 @@ func (e *Engine) Start(ctx context.Context) {
 
 	cleanupTicker := time.NewTicker(1 * time.Second)
 	metricsTicker := time.NewTicker(10 * time.Second)
-	snapshotTicker := time.NewTicker(e.SnapshotInterval)
 	defer cleanupTicker.Stop()
 	defer metricsTicker.Stop()
-	defer snapshotTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			e.saveStateSnapshot(time.Now())
 			return
 		case <-cleanupTicker.C:
 			e.cleanupTracking(time.Now())
 		case <-metricsTicker.C:
 			e.cleanupTracking(time.Now())
 			e.publishMetrics()
-		case now := <-snapshotTicker.C:
-			e.saveStateSnapshot(now)
 		}
 	}
 }
@@ -178,12 +168,6 @@ func (e *Engine) initOrderTracking() {
 	}
 	if e.FinalizedOrderTTL <= 0 {
 		e.FinalizedOrderTTL = defaultFinalizedOrderTTL
-	}
-	if e.SnapshotInterval <= 0 {
-		e.SnapshotInterval = defaultSnapshotInterval
-	}
-	if e.SQLitePath == "" {
-		e.SQLitePath = defaultSQLitePath
 	}
 	if e.acceptedOrders == nil {
 		e.acceptedOrders = make(map[string]struct{})
@@ -373,189 +357,12 @@ func (e *Engine) pendingOrderCount() int {
 	return len(e.pendingByOrder)
 }
 
-func (e *Engine) initStores() bool {
-	if e.OrderStore != nil && e.ExecutionStore != nil && e.StateStore != nil {
-		return true
-	}
-
-	orderStore, executionStore, stateStore, err := store.NewSQLiteStores(e.SQLitePath)
-	if err != nil {
-		e.publishRisk(fmt.Sprintf("init sqlite stores failed path=%s reason=%s", e.SQLitePath, err.Error()))
-		return false
-	}
-	if e.OrderStore == nil {
-		e.OrderStore = orderStore
-	}
-	if e.ExecutionStore == nil {
-		e.ExecutionStore = executionStore
-	}
-	if e.StateStore == nil {
-		e.StateStore = stateStore
-	}
-	return true
-}
-
-func (e *Engine) restoreFromStore() {
-	restoredFromSnapshot := false
-
-	if e.StateStore != nil && e.OrderStore != nil {
-		snapshotRec, ok, err := e.StateStore.LoadLatestSnapshot()
-		if err != nil {
-			e.publishRisk(fmt.Sprintf("load snapshot failed reason=%s", err.Error()))
-			return
+func (e *Engine) restoreOpenOrdersTrackingByIDs(orderIDs []string) {
+	for _, orderID := range orderIDs {
+		if orderID == "" {
+			continue
 		}
-		if ok {
-			openOrders, err := e.OrderStore.ListOpenOrders()
-			if err != nil {
-				e.publishRisk(fmt.Sprintf("load open orders failed reason=%s", err.Error()))
-				return
-			}
-
-			reservations := make([]state.ReservationSnapshot, 0, len(openOrders))
-			for _, order := range openOrders {
-				if order.RemainingSize <= 0 {
-					continue
-				}
-				reserved := order.Reserved
-				if reserved <= 0 {
-					reserved = requiredReservedForOrder(order.Side, order.Price, order.RemainingSize)
-				}
-				if reserved <= 0 {
-					continue
-				}
-				reservations = append(reservations, state.ReservationSnapshot{
-					OrderID:       order.OrderID,
-					MarketID:      order.MarketID,
-					TokenID:       order.TokenID,
-					Side:          order.Side,
-					Price:         order.Price,
-					RemainingSize: order.RemainingSize,
-					Reserved:      reserved,
-				})
-			}
-
-			tokenPositions := make(map[string]state.TokenPosition, len(snapshotRec.Tokens))
-			for tokenID, tp := range snapshotRec.Tokens {
-				tokenPositions[tokenID] = state.TokenPosition{
-					Available: tp.Available,
-					Reserved:  tp.Reserved,
-				}
-			}
-
-			e.State.Restore(state.Snapshot{
-				Position: state.Position{Tokens: tokenPositions},
-				Balance: state.Balance{
-					Available:  snapshotRec.Available,
-					Reserved:   snapshotRec.Reserved,
-					MinBalance: snapshotRec.MinBalance,
-				},
-			}, reservations)
-			e.restoreOpenOrdersTracking(openOrders)
-			restoredFromSnapshot = true
-		}
-	}
-
-	if restoredFromSnapshot {
-		return
-	}
-
-	if e.ExecutionStore != nil {
-		executions, err := e.ExecutionStore.ListExecutionsSince(0)
-		if err != nil {
-			e.publishRisk(fmt.Sprintf("load execution log failed reason=%s", err.Error()))
-			return
-		}
-		for _, ev := range executions {
-			e.handleExecutionEvent(ev, false)
-		}
-	}
-}
-
-func (e *Engine) restoreOpenOrdersTracking(openOrders []store.OrderRecord) {
-	for _, order := range openOrders {
-		switch order.Status {
-		case core.ExecutionStatusAccepted, core.ExecutionStatusPartiallyFilled:
-			e.markAccepted(order.OrderID)
-		}
-	}
-}
-
-func (e *Engine) saveStateSnapshot(now time.Time) {
-	if e.StateStore == nil {
-		return
-	}
-	snap := e.State.Snapshot()
-	tokens := make(map[string]store.TokenPositionRecord, len(snap.Position.Tokens))
-	for tokenID, tp := range snap.Position.Tokens {
-		tokens[tokenID] = store.TokenPositionRecord{
-			Available: tp.Available,
-			Reserved:  tp.Reserved,
-		}
-	}
-	rec := store.SnapshotRecord{
-		Available:  snap.Balance.Available,
-		Reserved:   snap.Balance.Reserved,
-		MinBalance: snap.Balance.MinBalance,
-		Tokens:     tokens,
-		At:         now.UnixNano(),
-	}
-	if err := e.StateStore.SaveSnapshot(rec); err != nil {
-		e.publishRisk(fmt.Sprintf("save snapshot failed reason=%s", err.Error()))
-	}
-}
-
-func (e *Engine) upsertOrderRecord(data core.ExecutionEvent) {
-	if e.OrderStore == nil || data.OrderID == "" {
-		return
-	}
-
-	now := time.Now().UnixNano()
-	rec, ok, err := e.OrderStore.GetOrder(data.OrderID)
-	if err != nil {
-		e.publishRisk(fmt.Sprintf("load order failed order=%s reason=%s", data.OrderID, err.Error()))
-		return
-	}
-	if !ok {
-		rec = store.OrderRecord{OrderID: data.OrderID}
-	}
-
-	if data.MarketID != "" {
-		rec.MarketID = data.MarketID
-	}
-	if data.TokenID != "" {
-		rec.TokenID = data.TokenID
-	}
-
-	rec.Side = data.Side
-
-	if data.Price > 0 {
-		rec.Price = data.Price
-	}
-	if data.RequestedSize > 0 {
-		rec.RequestedSize = data.RequestedSize
-	}
-
-	switch data.Status {
-	case core.ExecutionStatusAccepted:
-		rec.RemainingSize = data.RequestedSize
-		rec.Reserved = requiredReservedForOrder(data.Side, data.Price, rec.RemainingSize)
-	case core.ExecutionStatusPartiallyFilled:
-		filled := data.FilledSize
-		if filled < 0 {
-			filled = 0
-		}
-		rec.RemainingSize = math.Max(0, rec.RemainingSize-filled)
-		rec.Reserved = requiredReservedForOrder(rec.Side, rec.Price, rec.RemainingSize)
-	case core.ExecutionStatusFilled, core.ExecutionStatusCancelled, core.ExecutionStatusRejected:
-		rec.RemainingSize = 0
-		rec.Reserved = 0
-	}
-
-	rec.Status = data.Status
-	rec.UpdatedAt = now
-
-	if err := e.OrderStore.UpsertOrder(rec); err != nil {
-		e.publishRisk(fmt.Sprintf("save order failed order=%s reason=%s", data.OrderID, err.Error()))
+		e.markAccepted(orderID)
 	}
 }
 

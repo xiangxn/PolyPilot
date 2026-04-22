@@ -22,9 +22,6 @@ balance_sync:
 
 	cfg := loadFromDir(t, tmp)
 
-	if cfg.SQLitePath != "data/test.db" {
-		t.Fatalf("sqlite_path mismatch: %s", cfg.SQLitePath)
-	}
 	if cfg.ChainRPCURL != "https://example-rpc" {
 		t.Fatalf("chain_rpc_url mismatch: %s", cfg.ChainRPCURL)
 	}

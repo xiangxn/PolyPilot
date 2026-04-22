@@ -10,26 +10,6 @@ const (
 	defaultBalanceSyncEpsilon  = 1e-6
 )
 
-type BalanceReader interface {
-	ReadOnchainBalance(ctx context.Context) (float64, error)
-}
-
-type BalanceSyncEvent struct {
-	OnchainTotal float64
-	Drift        float64
-	Changed      bool
-	Err          error
-}
-
-type BalanceSyncConfig struct {
-	Enabled    bool
-	Reader     BalanceReader
-	Interval   time.Duration
-	Epsilon    float64
-	MinBalance float64
-	OnEvent    func(BalanceSyncEvent)
-}
-
 func normalizeBalanceSyncConfig(cfg BalanceSyncConfig) BalanceSyncConfig {
 	if !cfg.Enabled {
 		return cfg
@@ -61,14 +41,14 @@ func (s *State) StartBalanceSync(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					s.SyncOnchainBalanceOnce(ctx)
+					s.SyncBalanceOnce(ctx)
 				}
 			}
 		}()
 	})
 }
 
-func (s *State) SyncOnchainBalanceOnce(ctx context.Context) BalanceSyncEvent {
+func (s *State) SyncBalanceOnce(ctx context.Context) BalanceSyncEvent {
 	if s == nil || s.balanceSync.Reader == nil {
 		return BalanceSyncEvent{}
 	}

@@ -296,10 +296,9 @@ func (e *Executor) submitCancels(intents []runtime.OrderIntent) {
 		if _, err := e.Client.CancelOrders(ids); err != nil {
 			for _, in := range intents {
 				e.publish(core.ExecutionEvent{
-					OrderID: in.OrderID,
-					Status:  core.ExecutionStatusRejected,
-					Reason:  fmt.Sprintf("cancel orders failed: %v", err),
-					At:      time.Now(),
+					Status: core.ExecutionStatusRejected,
+					Reason: fmt.Sprintf("cancel orders failed (order=%s): %v", in.OrderID, err),
+					At:     time.Now(),
 				})
 			}
 		}
@@ -309,10 +308,9 @@ func (e *Executor) submitCancels(intents []runtime.OrderIntent) {
 	in := intents[0]
 	if _, err := e.Client.CancelOrder(&orders.OrderPayload{OrderID: in.OrderID}); err != nil {
 		e.publish(core.ExecutionEvent{
-			OrderID: in.OrderID,
-			Status:  core.ExecutionStatusRejected,
-			Reason:  fmt.Sprintf("cancel order failed: %v", err),
-			At:      time.Now(),
+			Status: core.ExecutionStatusRejected,
+			Reason: fmt.Sprintf("cancel order failed (order=%s): %v", in.OrderID, err),
+			At:     time.Now(),
 		})
 	}
 }

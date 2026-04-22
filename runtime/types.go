@@ -4,7 +4,6 @@ import (
 	"context"
 	"polypilot/core"
 	"polypilot/state"
-	"polypilot/store"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -77,12 +76,6 @@ type Engine struct {
 
 	PendingEventTTL   time.Duration
 	FinalizedOrderTTL time.Duration
-	SnapshotInterval  time.Duration
-	SQLitePath        string
-
-	OrderStore     store.OrderStore
-	ExecutionStore store.ExecutionStore
-	StateStore     store.StateStore
 
 	ticks             atomic.Uint64
 	inputEvents       atomic.Uint64

@@ -3,78 +3,23 @@ package state
 import (
 	"errors"
 	"maps"
-	"sync"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
 const floatEpsilon = 1e-9
 
-type TokenPosition struct {
-	Available float64
-	Reserved  float64
-}
-
-type Position struct {
-	Tokens map[string]TokenPosition
-}
-
-type Balance struct {
-	Available  float64
-	Reserved   float64
-	MinBalance float64
-}
-
-type Snapshot struct {
-	Position Position
-	Balance  Balance
-}
-
-type ReservationSnapshot struct {
-	OrderID       string
-	MarketID      string
-	TokenID       string
-	Side          model.Side
-	Price         float64
-	RemainingSize float64
-	Reserved      float64
-}
-
-type orderReservation struct {
-	MarketID      string
-	TokenID       string
-	Side          model.Side
-	Price         float64
-	RemainingSize float64
-	Reserved      float64
-}
-
-type State struct {
-	mu             sync.RWMutex
-	position       Position
-	balance        Balance
-	reservations   map[string]orderReservation
-	balanceSync    BalanceSyncConfig
-	balanceSyncRun sync.Once
-}
-
-func NewState(balanceSync BalanceSyncConfig) *State {
-	return NewStateWithInitialAvailable(balanceSync.MinBalance, 0, balanceSync)
-}
-
-func NewStateWithInitialAvailable(minBalance, initialAvailable float64, balanceSync BalanceSyncConfig) *State {
+func NewState(balanceSync BalanceSyncConfig, restoreClient ExchangeStateClient) *State {
+	minBalance := balanceSync.MinBalance
 	if minBalance < 0 {
 		minBalance = 0
 	}
-	if initialAvailable < 0 {
-		initialAvailable = 0
-	}
-
 	return &State{
-		position:     Position{Tokens: make(map[string]TokenPosition)},
-		balance:      Balance{Available: initialAvailable, Reserved: 0, MinBalance: minBalance},
-		reservations: make(map[string]orderReservation),
-		balanceSync:  normalizeBalanceSyncConfig(balanceSync),
+		position:          Position{Tokens: make(map[string]TokenPosition)},
+		balance:           Balance{Available: 0, Reserved: 0, MinBalance: minBalance},
+		orderReservations: make(map[string]OrderReservation),
+		balanceSync:       normalizeBalanceSyncConfig(balanceSync),
+		restoreClient:     restoreClient,
 	}
 }
 
@@ -87,10 +32,11 @@ func (s *State) Snapshot() Snapshot {
 			Tokens: cloneTokenPositions(s.position.Tokens),
 		},
 		Balance: s.balance,
+		Orders:  cloneOrderReservations(s.orderReservations),
 	}
 }
 
-func (s *State) Restore(snapshot Snapshot, reservations []ReservationSnapshot) {
+func (s *State) Restore(snapshot Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -101,9 +47,9 @@ func (s *State) Restore(snapshot Snapshot, reservations []ReservationSnapshot) {
 		s.position.Tokens = make(map[string]TokenPosition)
 	}
 
-	s.balance = Balance{Available: snapshot.Balance.Available, Reserved: 0, MinBalance: snapshot.Balance.MinBalance}
-	s.reservations = make(map[string]orderReservation, len(reservations))
-	for _, r := range reservations {
+	s.balance = Balance{Available: snapshot.Balance.Available, Reserved: snapshot.Balance.Reserved, MinBalance: snapshot.Balance.MinBalance}
+	s.orderReservations = make(map[string]OrderReservation, len(snapshot.Orders))
+	for _, r := range snapshot.Orders {
 		if r.OrderID == "" {
 			continue
 		}
@@ -113,22 +59,17 @@ func (s *State) Restore(snapshot Snapshot, reservations []ReservationSnapshot) {
 		if r.Reserved < 0 {
 			r.Reserved = 0
 		}
-		s.reservations[r.OrderID] = orderReservation{
-			MarketID:      r.MarketID,
-			TokenID:       r.TokenID,
-			Side:          r.Side,
-			Price:         r.Price,
-			RemainingSize: r.RemainingSize,
-			Reserved:      r.Reserved,
-		}
+		s.orderReservations[r.OrderID] = r
 
 		switch r.Side {
 		case model.BUY:
 			s.balance.Reserved += r.Reserved
+			s.balance.Available -= r.Reserved
 		case model.SELL:
 			k := tokenKey(r.TokenID)
 			tp := s.position.Tokens[k]
 			tp.Reserved += r.Reserved
+			tp.Available -= r.Reserved
 			s.position.Tokens[k] = tp
 		}
 	}
@@ -159,7 +100,7 @@ func (s *State) ReserveOrder(orderID, marketID, tokenID string, side model.Side,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.reservations[orderID]; exists {
+	if _, exists := s.orderReservations[orderID]; exists {
 		return errors.New("order already reserved")
 	}
 
@@ -184,7 +125,8 @@ func (s *State) ReserveOrder(orderID, marketID, tokenID string, side model.Side,
 		s.position.Tokens[k] = tp
 	}
 
-	s.reservations[orderID] = orderReservation{
+	s.orderReservations[orderID] = OrderReservation{
+		OrderID:       orderID,
 		MarketID:      marketID,
 		TokenID:       tokenID,
 		Side:          side,
@@ -210,7 +152,7 @@ func (s *State) ApplyFill(orderID, marketID, tokenID string, side model.Side, fi
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, exists := s.reservations[orderID]
+	res, exists := s.orderReservations[orderID]
 	if !exists {
 		return errors.New("reservation not found")
 	}
@@ -264,9 +206,9 @@ func (s *State) ApplyFill(orderID, marketID, tokenID string, side model.Side, fi
 	}
 
 	if res.RemainingSize <= floatEpsilon {
-		delete(s.reservations, orderID)
+		delete(s.orderReservations, orderID)
 	} else {
-		s.reservations[orderID] = res
+		s.orderReservations[orderID] = res
 	}
 
 	return nil
@@ -280,7 +222,7 @@ func (s *State) ReleaseOrder(orderID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, exists := s.reservations[orderID]
+	res, exists := s.orderReservations[orderID]
 	if !exists {
 		return
 	}
@@ -304,7 +246,7 @@ func (s *State) ReleaseOrder(orderID string) {
 		s.position.Tokens[k] = tp
 	}
 
-	delete(s.reservations, orderID)
+	delete(s.orderReservations, orderID)
 }
 
 func (s *State) ReconcileOnchainBalance(onchainTotal float64, epsilon float64) (changed bool, drift float64) {
@@ -355,6 +297,16 @@ func cloneTokenPositions(src map[string]TokenPosition) map[string]TokenPosition 
 		return map[string]TokenPosition{}
 	}
 	dst := make(map[string]TokenPosition, len(src))
+	maps.Copy(dst, src)
+
+	return dst
+}
+
+func cloneOrderReservations(src map[string]OrderReservation) map[string]OrderReservation {
+	if len(src) == 0 {
+		return map[string]OrderReservation{}
+	}
+	dst := make(map[string]OrderReservation, len(src))
 	maps.Copy(dst, src)
 
 	return dst
