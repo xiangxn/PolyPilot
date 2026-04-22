@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"math/big"
 	appconfig "polypilot/internal/config"
 	"sync/atomic"
 	"testing"
@@ -468,8 +467,8 @@ func TestBuildMulticallBalanceSyncConfig_SetsMinBalance(t *testing.T) {
 	}
 
 	pmCfg := appconfig.Config{}.Polymarket
-	pmCfg.ChainID = big.NewInt(137)
-	pmCfg.FunderAddress = &funder
+	pmCfg.ChainID = 137
+	pmCfg.FunderAddress = funder
 	cfg, err = BuildMulticallBalanceSyncConfig(appconfig.Config{
 		ChainRPCURL: "https://polygon.drpc.org",
 		BalanceSync: appconfig.BalanceSyncConfig{

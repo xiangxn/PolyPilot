@@ -7,7 +7,6 @@ import (
 	"polypilot/runtime"
 	"polypilot/state"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
@@ -46,17 +45,18 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			return nil
 		}
 
-		ins := make([]runtime.OrderIntent, 0, len(o.Tokens))
-		for _, t := range o.Tokens {
-			ins = append(ins, runtime.OrderIntent{
-				MarketID: o.MarketID,
-				TokenID:  t.Id,
-				Price:    0.35,
-				Side:     model.BUY,
-				Size:     5,
-			})
-		}
-		return ins
+		// ins := make([]runtime.OrderIntent, 0, len(o.Tokens))
+		// for _, t := range o.Tokens {
+		// 	ins = append(ins, runtime.OrderIntent{
+		// 		MarketID: o.MarketID,
+		// 		TokenID:  t.Id,
+		// 		Price:    0.35,
+		// 		Side:     model.BUY,
+		// 		Size:     5,
+		// 	})
+		// }
+		// return ins
+
 	case core.EventOrderBook:
 		// 判断zscore等信息是否应该止损
 		orderBook := e.Data.(sdk.OrderBook)

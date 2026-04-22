@@ -45,7 +45,7 @@ balance_sync:
 	if cfg.Polymarket.ClobBaseURL != defaults.Polymarket.ClobBaseURL {
 		t.Fatalf("polymarket.clob_base_url should fallback to sdk default")
 	}
-	if cfg.Polymarket.ChainID == nil || defaults.Polymarket.ChainID == nil || cfg.Polymarket.ChainID.Cmp(defaults.Polymarket.ChainID) != 0 {
+	if cfg.Polymarket.ChainID == 0 || defaults.Polymarket.ChainID == 0 || cfg.Polymarket.ChainID != defaults.Polymarket.ChainID {
 		t.Fatalf("polymarket.chain_id should fallback to sdk default")
 	}
 }

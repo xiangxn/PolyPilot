@@ -45,15 +45,15 @@ func BuildMulticallBalanceSyncConfig(cfg appconfig.Config) (BalanceSyncConfig, e
 	if !cfg.BalanceSync.Enabled {
 		return BalanceSyncConfig{}, nil
 	}
-	if cfg.Polymarket.FunderAddress == nil || *cfg.Polymarket.FunderAddress == "" {
+	if cfg.Polymarket.FunderAddress == "" {
 		return BalanceSyncConfig{}, errors.New("missing polymarket funder address")
 	}
 
 	reader, err := NewMulticallBalanceReader(
 		cfg.ChainRPCURL,
-		cfg.Polymarket.ChainID,
+		big.NewInt(cfg.Polymarket.ChainID),
 		cfg.BalanceSync.CollateralToken,
-		*cfg.Polymarket.FunderAddress,
+		cfg.Polymarket.FunderAddress,
 	)
 	if err != nil {
 		return BalanceSyncConfig{}, fmt.Errorf("invalid balance sync config: %w", err)
