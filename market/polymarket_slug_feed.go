@@ -3,7 +3,6 @@ package market
 import (
 	"context"
 	"fmt"
-	"os"
 	"polypilot/core"
 	"strings"
 	"time"
@@ -189,12 +188,6 @@ func (f *PolymarketSlugFeed) ensureDefaults() {
 func (f *PolymarketSlugFeed) resolveSignerKey() string {
 	if f.SignerKey != "" {
 		return strings.TrimPrefix(f.SignerKey, "0x")
-	}
-	if key := os.Getenv("POLYMARKET_SIGNER_KEY"); key != "" {
-		return strings.TrimPrefix(key, "0x")
-	}
-	if key := os.Getenv("SIGNERKEY"); key != "" {
-		return strings.TrimPrefix(key, "0x")
 	}
 	return defaultReadonlyPrivKey
 }

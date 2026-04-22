@@ -9,6 +9,7 @@ import (
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
+	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
 type Strategy struct {
@@ -58,10 +59,11 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 		return ins
 	case core.EventOrderBook:
 		// 判断zscore等信息是否应该止损
+		orderBook := e.Data.(sdk.OrderBook)
 		latestZ := o.Features["latestZ"].(float64)
 		zWindows := o.Features["zWindows"].([]float64)
 		// TODO: 实现止损/止盈逻辑
-		log.Printf("latestZ: %f, zWindows: %v", latestZ, zWindows)
+		log.Printf("latestZ: %f, zWindows: %v, orderBook: %v", latestZ, zWindows, orderBook)
 	}
 
 	return nil
