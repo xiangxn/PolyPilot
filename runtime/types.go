@@ -47,7 +47,7 @@ type Probability interface {
 
 type Strategy interface {
 	Init(bus *core.EventBus, ctx context.Context)
-	OnUpdate(e core.Event, m Observation) []OrderIntent
+	OnUpdate(e core.Event, o Observation, stateSnap state.Snapshot) []OrderIntent
 }
 
 type RiskManager interface {

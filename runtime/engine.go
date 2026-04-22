@@ -145,17 +145,22 @@ func (e *Engine) handleInputUpdate(ev core.Event) {
 	}
 	e.ticks.Add(1)
 
+	var snap state.Snapshot
+	hasSnap := false
 	for _, strategy := range e.Strategies {
 		if strategy == nil {
 			continue
 		}
-		intents := strategy.OnUpdate(ev, obs)
+		if !hasSnap {
+			snap = e.State.Snapshot()
+			hasSnap = true
+		}
+		intents := strategy.OnUpdate(ev, obs, snap)
 		if len(intents) == 0 {
 			continue
 		}
 
-		snapshot := e.State.Snapshot()
-		if err := e.Risk.Check(intents, snapshot); err != nil {
+		if err := e.Risk.Check(intents, snap); err != nil {
 			e.riskRejected.Add(1)
 			e.publishRisk(err.Error())
 			return

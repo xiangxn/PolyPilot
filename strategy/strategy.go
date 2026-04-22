@@ -5,14 +5,11 @@ import (
 	"log"
 	"polypilot/core"
 	"polypilot/runtime"
+	"polypilot/state"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
 )
-
-const defaultReadonlyPrivKey = "1111111111111111111111111111111111111111111111111111111111111111"
-const defaultWindowSize = 60
-const defaultCoin = "BTC"
 
 type Strategy struct {
 	Bus    *core.EventBus
@@ -24,8 +21,8 @@ func (s *Strategy) Init(bus *core.EventBus, ctx context.Context) {
 
 }
 
-func (s *Strategy) OnUpdate(e core.Event, m runtime.Observation) []runtime.OrderIntent {
-	log.Printf("Observation: %+v", m)
+func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state.Snapshot) []runtime.OrderIntent {
+	log.Printf("Observation: %+v", o)
 	switch e.Type {
 	case core.EventMarket:
 		obj, ok := e.Data.(gjson.Result)
@@ -34,11 +31,11 @@ func (s *Strategy) OnUpdate(e core.Event, m runtime.Observation) []runtime.Order
 		}
 		s.market = &obj
 		// 剩余时间不足时不下单
-		if m.TimeLeftSec < 240 {
+		if o.TimeLeftSec < 240 {
 			return nil
 		}
 		okPrice := true
-		for _, v := range m.Tokens {
+		for _, v := range o.Tokens {
 			if v.AskPrice < 0.4 {
 				okPrice = false
 			}
@@ -48,10 +45,10 @@ func (s *Strategy) OnUpdate(e core.Event, m runtime.Observation) []runtime.Order
 			return nil
 		}
 
-		ins := make([]runtime.OrderIntent, 0, len(m.Tokens))
-		for _, t := range m.Tokens {
+		ins := make([]runtime.OrderIntent, 0, len(o.Tokens))
+		for _, t := range o.Tokens {
 			ins = append(ins, runtime.OrderIntent{
-				MarketID: m.MarketID,
+				MarketID: o.MarketID,
 				TokenID:  t.Id,
 				Price:    0.35,
 				Side:     model.BUY,
@@ -61,9 +58,9 @@ func (s *Strategy) OnUpdate(e core.Event, m runtime.Observation) []runtime.Order
 		return ins
 	case core.EventOrderBook:
 		// 判断zscore等信息是否应该止损
-		latestZ := m.Features["latestZ"].(float64)
-		zWindows := m.Features["zWindows"].([]float64)
-
+		latestZ := o.Features["latestZ"].(float64)
+		zWindows := o.Features["zWindows"].([]float64)
+		// TODO: 实现止损/止盈逻辑
 		log.Printf("latestZ: %f, zWindows: %v", latestZ, zWindows)
 	}
 
