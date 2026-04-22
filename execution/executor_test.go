@@ -48,6 +48,30 @@ func TestExecute_EmptyCancelIntentPublishesNothing(t *testing.T) {
 	assertNoExecutionEvent(t, ch)
 }
 
+func TestExecute_QueueFullPublishesRejected(t *testing.T) {
+	bus := core.NewEventBus()
+	ch := bus.Subscribe()
+	exec := &Executor{Bus: bus, Client: &sdk.PolymarketClient{}, queue: make(chan []runtime.OrderIntent, 1)}
+
+	exec.queue <- []runtime.OrderIntent{{Action: runtime.OrderIntentActionPlace, MarketID: "m-buffer", TokenID: "tk-buffer", Price: 0.33, Side: model.BUY, Size: 1}}
+	exec.Execute([]runtime.OrderIntent{{
+		Action:   runtime.OrderIntentActionPlace,
+		MarketID: "m1",
+		TokenID:  "tk1",
+		Price:    0.4,
+		Side:     model.BUY,
+		Size:     1,
+	}})
+
+	ev := mustRecvExecutionEvent(t, ch)
+	if ev.Status != core.ExecutionStatusRejected {
+		t.Fatalf("unexpected status: %s", ev.Status)
+	}
+	if ev.Reason != "execution queue full" {
+		t.Fatalf("unexpected reason: %s", ev.Reason)
+	}
+}
+
 func TestOnOrderEvent_MatchedPublishesNothing(t *testing.T) {
 	bus := core.NewEventBus()
 	ch := bus.Subscribe()

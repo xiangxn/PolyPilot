@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"polypilot/core"
 	"polypilot/runtime"
 	"strings"
@@ -17,7 +16,10 @@ import (
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
-const floatEpsilon = 1e-9
+const (
+	floatEpsilon          = 1e-9
+	defaultExecutionQueue = 1024
+)
 
 type trackedOrder struct {
 	MarketID      string
@@ -41,9 +43,13 @@ type Executor struct {
 	OrderType    orders.OrderType
 	DeferExec    bool
 
-	startOnce sync.Once
-	mu        sync.Mutex
-	tracked   map[string]*trackedOrder
+	ExecutionQueueSize int
+
+	startOnce  sync.Once
+	workerOnce sync.Once
+	mu         sync.Mutex
+	tracked    map[string]*trackedOrder
+	queue      chan []runtime.OrderIntent
 }
 
 func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
@@ -54,6 +60,14 @@ func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
 	if e.tracked == nil {
 		e.tracked = make(map[string]*trackedOrder)
 	}
+	if e.ExecutionQueueSize <= 0 {
+		e.ExecutionQueueSize = defaultExecutionQueue
+	}
+
+	e.workerOnce.Do(func() {
+		e.queue = make(chan []runtime.OrderIntent, e.ExecutionQueueSize)
+		go e.consumeExecuteQueue(ctx)
+	})
 
 	e.startOnce.Do(func() {
 		cfg := e.Config
@@ -84,13 +98,12 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 		return
 	}
 
-	var placements []runtime.OrderIntent
-	var cancels []runtime.OrderIntent
-
+	validated := make([]runtime.OrderIntent, 0, len(intents))
 	for _, in := range intents {
 		action := in.Action
 		if action == "" {
 			action = runtime.OrderIntentActionPlace
+			in.Action = action
 		}
 
 		switch action {
@@ -108,13 +121,13 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 				})
 				continue
 			}
-			placements = append(placements, in)
+			validated = append(validated, in)
 		case runtime.OrderIntentActionCancel:
 			if strings.TrimSpace(in.OrderID) == "" {
 				log.Printf("skip cancel intent: empty order id")
 				continue
 			}
-			cancels = append(cancels, in)
+			validated = append(validated, in)
 		default:
 			e.publish(core.ExecutionEvent{
 				MarketID:      in.MarketID,
@@ -129,8 +142,71 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 		}
 	}
 
-	e.submitPlacements(placements)
-	e.submitCancels(cancels)
+	if len(validated) == 0 {
+		return
+	}
+	if e.queue == nil {
+		if e.ExecutionQueueSize <= 0 {
+			e.ExecutionQueueSize = defaultExecutionQueue
+		}
+		e.workerOnce.Do(func() {
+			e.queue = make(chan []runtime.OrderIntent, e.ExecutionQueueSize)
+			go e.consumeExecuteQueue(context.Background())
+		})
+	}
+
+	batch := make([]runtime.OrderIntent, len(validated))
+	copy(batch, validated)
+	select {
+	case e.queue <- batch:
+	default:
+		e.rejectBatch(batch, "execution queue full")
+	}
+}
+
+func (e *Executor) consumeExecuteQueue(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case batch := <-e.queue:
+			if len(batch) == 0 {
+				continue
+			}
+			var placements []runtime.OrderIntent
+			var cancels []runtime.OrderIntent
+			for _, in := range batch {
+				switch in.Action {
+				case runtime.OrderIntentActionCancel:
+					cancels = append(cancels, in)
+				default:
+					placements = append(placements, in)
+				}
+			}
+			e.submitPlacements(placements)
+			e.submitCancels(cancels)
+		}
+	}
+}
+
+func (e *Executor) rejectBatch(intents []runtime.OrderIntent, reason string) {
+	now := time.Now()
+	for _, in := range intents {
+		ev := core.ExecutionEvent{
+			MarketID:      in.MarketID,
+			TokenID:       in.TokenID,
+			Price:         in.Price,
+			Side:          in.Side,
+			RequestedSize: in.Size,
+			Status:        core.ExecutionStatusRejected,
+			Reason:        reason,
+			At:            now,
+		}
+		if in.Action == runtime.OrderIntentActionCancel {
+			ev.OrderID = in.OrderID
+		}
+		e.publish(ev)
+	}
 }
 
 func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
@@ -510,12 +586,7 @@ func (e *Executor) resolveSignerKey() string {
 	if strings.TrimSpace(e.SignerKey) != "" {
 		return strings.TrimPrefix(strings.TrimSpace(e.SignerKey), "0x")
 	}
-	if key := strings.TrimSpace(os.Getenv("POLYMARKET_SIGNER_KEY")); key != "" {
-		return strings.TrimPrefix(key, "0x")
-	}
-	if key := strings.TrimSpace(os.Getenv("SIGNERKEY")); key != "" {
-		return strings.TrimPrefix(key, "0x")
-	}
+
 	return core.DefaultReadonlyPrivKey
 }
 
