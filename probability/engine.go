@@ -17,9 +17,10 @@ import (
 )
 
 type Engine struct {
-	market    *gjson.Result
-	openPrice float64
-	endTime   int64
+	market      *gjson.Result
+	openPrice   float64
+	latestPrice atomicx.Float64
+	endTime     int64
 
 	zscore *indicators.ZScore
 
@@ -130,13 +131,17 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			obs.Features = make(map[string]any)
 			obs.Features["latestZ"] = e.latestZ.Load()
 			if e.zWindows != nil {
-				obs.Features["zWindows"] = e.zWindows.Last(10)
+				obs.Features["zWindows"] = e.zWindows.Last(10) // 最后10s的zscore值
 			}
+			obs.Features["openPrice"] = e.openPrice
+			obs.Features["latestPrice"] = e.latestPrice.Load()
+			obs.Features["endTime"] = e.endTime
 			return obs, true
 		}
 	case core.EventSignal:
 		data, ok := ev.Data.(sdk.ExternalPrice)
 		if ok && e.openPrice != 0 {
+			e.latestPrice.Store(data.Price)
 			e.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
 			if e.zscore.IsReady() { // 为有效数据后才开始记录zscore (这里为窗口大小的一半)
 				timeLeft := e.endTime/1000 - time.Now().Unix()

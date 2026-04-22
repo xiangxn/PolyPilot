@@ -207,6 +207,10 @@ github.com/xiangxn/go-polymarket-sdk v0.3.0 h1:L9YbjKtkaTDumshgg7yMqlTK+ALpiL4Rz
 github.com/xiangxn/go-polymarket-sdk v0.3.0/go.mod h1:wYs7V17CGe//HOX/2yykaUrnF3B0laAymPTNleCQgW8=
 github.com/xiangxn/go-polymarket-sdk v0.3.1 h1:9RJFIs+S5HqjNHZjRdfZOAU3B8mV3abTw/LuESeKTMA=
 github.com/xiangxn/go-polymarket-sdk v0.3.1/go.mod h1:wYs7V17CGe//HOX/2yykaUrnF3B0laAymPTNleCQgW8=
+github.com/xiangxn/go-polymarket-sdk v0.3.2 h1:eEODcqNeHFkV2ryzdxY1dDEJC+p9wl4XLvanSdxnDmI=
+github.com/xiangxn/go-polymarket-sdk v0.3.2/go.mod h1:wYs7V17CGe//HOX/2yykaUrnF3B0laAymPTNleCQgW8=
+github.com/xiangxn/go-polymarket-sdk v0.3.3 h1:e6kFJUEzIDM7o8mM/jJlfEoQBZrYYv/T8SEqfFku6vI=
+github.com/xiangxn/go-polymarket-sdk v0.3.3/go.mod h1:wYs7V17CGe//HOX/2yykaUrnF3B0laAymPTNleCQgW8=
 github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 h1:gEOO8jv9F4OT7lGCjxCBTO/36wtF6j2nSip77qHd4x4=
 github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1/go.mod h1:Ohn+xnUBiLI6FVj/9LpzZWtj1/D6lUovWYBkxHVV3aM=
 go.uber.org/atomic v1.9.0 h1:ECmE8Bn/WFTYwEW/bpKD3M8VtR/zQVbavAoalC1PYyE=
