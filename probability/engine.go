@@ -6,6 +6,7 @@ import (
 	"polypilot/core"
 	"polypilot/indicators"
 	"polypilot/internal/atomicx"
+	"polypilot/internal/buffer"
 	"polypilot/runtime"
 	"time"
 
@@ -23,7 +24,7 @@ type Engine struct {
 	zscore *indicators.ZScore
 
 	latestZ  atomicx.Float64
-	zWindows *indicators.RingBuffer
+	zWindows *buffer.RingBuffer
 
 	tokens map[string]runtime.Token
 }
@@ -88,7 +89,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			}
 
 			if e.zWindows == nil {
-				e.zWindows = indicators.NewRingBuffer(e.zscore.WindowSize())
+				e.zWindows = buffer.NewRingBuffer(e.zscore.WindowSize())
 			} else {
 				e.zWindows.Reset()
 			}

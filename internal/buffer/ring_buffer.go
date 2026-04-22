@@ -1,4 +1,4 @@
-package indicators
+package buffer
 
 import "sync"
 
