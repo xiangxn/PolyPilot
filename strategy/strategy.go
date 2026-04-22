@@ -22,7 +22,7 @@ func (s *Strategy) Init(bus *core.EventBus, ctx context.Context) {
 }
 
 func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state.Snapshot) []runtime.OrderIntent {
-	log.Printf("Observation: %+v", o)
+	// log.Printf("Observation: %+v", o)
 	switch e.Type {
 	case core.EventMarket:
 		obj, ok := e.Data.(gjson.Result)

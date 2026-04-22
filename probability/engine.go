@@ -100,7 +100,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			}, true
 		}
 	case core.EventOrderBook:
-		if e.market != nil && e.openPrice != 0 && e.endTime != 0 && e.zscore.Length() >= e.zscore.WindowSize() {
+		if e.market != nil && e.openPrice != 0 && e.endTime != 0 && e.zscore.IsReady() {
 			var obs runtime.Observation
 			orderBook, ok := ev.Data.(sdk.OrderBook)
 			if !ok {
@@ -137,7 +137,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		data, ok := ev.Data.(sdk.ExternalPrice)
 		if ok && e.openPrice != 0 {
 			e.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
-			if e.zscore.Length() >= e.zscore.WindowSize() { // 为有效数据后才开始记录zscore
+			if e.zscore.IsReady() { // 为有效数据后才开始记录zscore (这里为窗口大小的一半)
 				timeLeft := e.endTime/1000 - time.Now().Unix()
 				if timeLeft >= 1 {
 					z := e.zscore.ZScore(data.Price, e.openPrice, float64(timeLeft))

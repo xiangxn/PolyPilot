@@ -149,9 +149,11 @@ func (s *ZScore) ZScore(currentPrice, startPrice, remainingSeconds float64) floa
 	return logReturn / scaledSigma
 }
 
-func (s *ZScore) Length() int {
+func (s *ZScore) IsReady() bool {
+	count := 0
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	count = len(s.series)
+	s.mu.Unlock()
 
-	return len(s.series)
+	return count >= s.windowSize/2
 }
