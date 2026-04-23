@@ -26,5 +26,3 @@ const (
 	ExecutionStatusCancelled       ExecutionStatus = "CANCELLED"
 	ExecutionStatusRejected        ExecutionStatus = "REJECTED"
 )
-
-const DefaultReadonlyPrivKey = "1111111111111111111111111111111111111111111111111111111111111111"

@@ -39,7 +39,6 @@ type Executor struct {
 	Client       *sdk.PolymarketClient
 	TradeMonitor *sdk.TradeMonitor
 	Config       *sdk.Config
-	SignerKey    string
 	OrderType    orders.OrderType
 	DeferExec    bool
 
@@ -75,7 +74,7 @@ func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
 			cfg = sdk.DefaultConfig()
 		}
 		if e.Client == nil {
-			e.Client = sdk.NewClient(e.resolveSignerKey(), cfg)
+			e.Client = sdk.NewClient(cfg)
 		}
 		if e.TradeMonitor == nil && cfg != nil {
 			e.TradeMonitor = sdk.NewTradeMonitor(cfg.Polymarket.ClobWSBaseURL, cfg.Polymarket.CLOBCreds)
@@ -155,12 +154,10 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 		})
 	}
 
-	batch := make([]runtime.OrderIntent, len(validated))
-	copy(batch, validated)
 	select {
-	case e.queue <- batch:
+	case e.queue <- validated:
 	default:
-		e.rejectBatch(batch, "execution queue full")
+		e.rejectBatch(validated, "execution queue full")
 	}
 }
 
@@ -219,13 +216,14 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 		order  *model.SignedOrder
 	}
 	preparedOrders := make([]prepared, 0, len(intents))
+	signatureType := model.POLY_GNOSIS_SAFE
 	for _, in := range intents {
 		signedOrder, err := e.Client.CreateOrder(&orders.UserOrder{
 			TokenID: in.TokenID,
 			Price:   in.Price,
 			Size:    in.Size,
 			Side:    in.Side,
-		}, orders.CreateOrderOptions{})
+		}, orders.CreateOrderOptions{SignatureType: &signatureType})
 		if err != nil {
 			e.publish(core.ExecutionEvent{
 				MarketID:      in.MarketID,
@@ -251,7 +249,11 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 		for _, po := range preparedOrders {
 			args = append(args, orders.PostOrdersArgs{Order: po.order, OrderType: e.OrderType})
 		}
-		if _, err := e.Client.PostOrders(args, e.DeferExec); err != nil {
+
+		log.Printf("[Executor] 下单时间: %d", time.Now().UnixMilli())
+		results, err := e.Client.PostOrders(args, e.DeferExec)
+		log.Printf("[Executor] 下单返回: %d", time.Now().UnixMilli())
+		if err != nil {
 			for _, po := range preparedOrders {
 				e.publish(core.ExecutionEvent{
 					MarketID:      po.intent.MarketID,
@@ -264,12 +266,32 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 					At:            time.Now(),
 				})
 			}
+		} else {
+			for i, result := range results.Array() {
+				errorMsg := result.Get("errorMsg").String()
+				if errorMsg != "" {
+					po := preparedOrders[i]
+					e.publish(core.ExecutionEvent{
+						MarketID:      po.intent.MarketID,
+						TokenID:       po.intent.TokenID,
+						Price:         po.intent.Price,
+						Side:          po.intent.Side,
+						RequestedSize: po.intent.Size,
+						Status:        core.ExecutionStatusRejected,
+						Reason:        fmt.Sprintf("post orders failed: %s", errorMsg),
+						At:            time.Now(),
+					})
+				}
+			}
 		}
 		return
 	}
 
 	single := preparedOrders[0]
-	if _, err := e.Client.PostOrder(single.order, e.OrderType, e.DeferExec); err != nil {
+	log.Printf("[Executor] 下单时间: %d", time.Now().UnixMilli())
+	result, err := e.Client.PostOrder(single.order, e.OrderType, e.DeferExec)
+	log.Printf("[Executor] 下单返回: %d", time.Now().UnixMilli())
+	if err != nil {
 		e.publish(core.ExecutionEvent{
 			MarketID:      single.intent.MarketID,
 			TokenID:       single.intent.TokenID,
@@ -278,6 +300,18 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			RequestedSize: single.intent.Size,
 			Status:        core.ExecutionStatusRejected,
 			Reason:        fmt.Sprintf("post order failed: %v", err),
+			At:            time.Now(),
+		})
+	} else {
+		errorMsg := result.Get("errorMsg").String()
+		e.publish(core.ExecutionEvent{
+			MarketID:      single.intent.MarketID,
+			TokenID:       single.intent.TokenID,
+			Price:         single.intent.Price,
+			Side:          single.intent.Side,
+			RequestedSize: single.intent.Size,
+			Status:        core.ExecutionStatusRejected,
+			Reason:        fmt.Sprintf("post order failed: %s", errorMsg),
 			At:            time.Now(),
 		})
 	}
@@ -578,14 +612,6 @@ func (e *Executor) publish(data core.ExecutionEvent) {
 	if e.Bus != nil {
 		e.Bus.Publish(core.Event{Type: core.EventExecution, Data: data})
 	}
-}
-
-func (e *Executor) resolveSignerKey() string {
-	if strings.TrimSpace(e.SignerKey) != "" {
-		return strings.TrimPrefix(strings.TrimSpace(e.SignerKey), "0x")
-	}
-
-	return core.DefaultReadonlyPrivKey
 }
 
 func validatePlacement(in runtime.OrderIntent) error {

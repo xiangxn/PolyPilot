@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"polypilot/core"
 	"polypilot/execution"
 	appconfig "polypilot/internal/config"
 	"polypilot/market"
@@ -39,25 +38,19 @@ func main() {
 		return
 	}
 
-	sdkCfg := &sdk.Config{Polymarket: cfg.Polymarket}
-	signerKey := cfg.SignerKey
-	if signerKey == "" {
-		signerKey = core.DefaultReadonlyPrivKey
-	}
-	sharedClient := sdk.NewClient(signerKey, sdkCfg)
+	sharedClient := sdk.NewClient(&cfg.SDKConfig)
 
 	engine := &runtime.Engine{
-		State: state.NewState(balanceSyncCfg, state.NewPolymarketStateClient(sharedClient, 0)),
+		State: state.NewState(balanceSyncCfg, state.NewPolymarketStateClient(sharedClient, &cfg.SDKConfig.Polymarket, 0)),
 		Risk:  &risk.Engine{},
 		Exec: &execution.Executor{
-			Client:    sharedClient,
-			Config:    sdkCfg,
-			SignerKey: cfg.SignerKey,
+			Client: sharedClient,
+			Config: &cfg.SDKConfig,
 		},
 		Feeds: []runtime.Feed{&market.PolymarketSlugFeed{
 			SlugPrefix:    "btc-updown-5m",
+			Config:        &cfg.SDKConfig,
 			WindowMinutes: 5,
-			SignerKey:     cfg.SignerKey,
 		}, &market.CryptoPriceFeed{MonitoSymble: "btc", MonitorType: sdk.MonitorChainlink}},
 		Observers:   []runtime.Observer{&observer.Logger{}},
 		Probability: &probability.Engine{},

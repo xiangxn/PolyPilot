@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
+	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
 type Token struct {
@@ -18,8 +19,9 @@ type Token struct {
 }
 
 type Observation struct {
-	At          int64
-	MarketID    string
+	At       int64
+	MarketID string
+	// tokenId -> Token
 	Tokens      map[string]Token
 	Probability float64
 	TimeLeftSec int64
@@ -27,6 +29,8 @@ type Observation struct {
 
 	// 可扩展特征（按命名空间 key）
 	Features map[string]any
+
+	GetOrderBook func(tokenId string) *sdk.OrderBook
 }
 
 type Feed interface {

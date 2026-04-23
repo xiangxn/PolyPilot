@@ -13,10 +13,9 @@ import (
 )
 
 const (
-	defaultSlugPrefix      = "btc-updown-5m"
-	defaultWindowMinutes   = 5
-	defaultFallbackPrice   = 0.5
-	defaultReadonlyPrivKey = "1111111111111111111111111111111111111111111111111111111111111111"
+	defaultSlugPrefix    = "btc-updown-5m"
+	defaultWindowMinutes = 5
+	defaultFallbackPrice = 0.5
 )
 
 type SlugMarket struct {
@@ -39,8 +38,6 @@ type PolymarketSlugFeed struct {
 	MarketMonitor *sdk.MarketMonitor
 	Config        *sdk.Config
 
-	SignerKey string
-
 	SlugPrefix    string
 	WindowMinutes int
 }
@@ -59,7 +56,7 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 		if cfg == nil {
 			cfg = sdk.DefaultConfig()
 		}
-		client := sdk.NewClient(f.resolveSignerKey(), cfg)
+		client := sdk.NewClient(cfg)
 		f.MarketMonitor = sdk.NewMarketMonitor(cfg.Polymarket.ClobWSBaseURL, client)
 	}
 
@@ -183,11 +180,4 @@ func (f *PolymarketSlugFeed) ensureDefaults() {
 	if f.WindowMinutes <= 0 {
 		f.WindowMinutes = defaultWindowMinutes
 	}
-}
-
-func (f *PolymarketSlugFeed) resolveSignerKey() string {
-	if f.SignerKey != "" {
-		return strings.TrimPrefix(f.SignerKey, "0x")
-	}
-	return defaultReadonlyPrivKey
 }

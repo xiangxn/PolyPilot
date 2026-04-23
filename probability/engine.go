@@ -8,9 +8,12 @@ import (
 	"polypilot/internal/atomicx"
 	"polypilot/internal/buffer"
 	"polypilot/runtime"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 	"github.com/xiangxn/go-polymarket-sdk/utils"
 
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
@@ -28,6 +31,9 @@ type Engine struct {
 	zWindows *buffer.RingBuffer
 
 	tokens map[string]runtime.Token
+
+	booksMu sync.RWMutex
+	books   map[string]*atomic.Value
 }
 
 func CopyMap[K comparable, V any](src map[K]V) map[K]V {
@@ -42,6 +48,7 @@ func CopyMap[K comparable, V any](src map[K]V) map[K]V {
 
 func (e *Engine) Init(ctx context.Context) {
 	e.tokens = make(map[string]runtime.Token, 2)
+	e.books = make(map[string]*atomic.Value)
 
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -67,10 +74,11 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 	case core.EventMarket:
 		obj, ok := ev.Data.(gjson.Result)
 		conditionId := obj.Get("conditionId").String()
-		if ok && (e.market == nil || conditionId != e.market.Get("conditionId").String()) {
+		if ok && (e.market == nil || conditionId != e.market.Get("conditionId").String() || e.openPrice == 0) {
 			e.latestZ.Store(0)
 			e.tokens = make(map[string]runtime.Token, 2)
-			e.market = &obj
+			e.books = make(map[string]*atomic.Value)
+
 			t, err := utils.ToTimestamp(obj.Get("endDate").String())
 			if err != nil {
 				e.endTime = 0
@@ -78,12 +86,33 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 				e.endTime = t
 			}
 			tokenIds := utils.GetStringArray(&obj, "clobTokenIds")
-			for _, tokenId := range tokenIds {
-				e.tokens[tokenId] = runtime.Token{Id: tokenId}
-			}
-			client := sdk.NewClient(core.DefaultReadonlyPrivKey, sdk.DefaultConfig())
+			client := sdk.NewClient(sdk.DefaultConfig())
 			cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, "btc")
-			e.openPrice = cpm.FetchOpenPrice(e.market)
+			obs, err := client.GetOrderBooks([]sdk.BookParams{{TokenId: tokenIds[0]}, {TokenId: tokenIds[1]}})
+			if err != nil {
+				return runtime.Observation{}, false
+			}
+
+			e.openPrice = cpm.FetchOpenPrice(&obj)
+			if e.openPrice == 0 {
+				return runtime.Observation{}, false
+			}
+
+			e.market = &obj
+			for _, o := range obs {
+				ap, bp := 0.0, 0.0
+				if len(o.Asks) > 0 {
+					ap = o.Asks[len(o.Asks)-1].Price
+				}
+				if len(o.Bids) > 0 {
+					bp = o.Bids[len(o.Bids)-1].Price
+				}
+				e.tokens[o.AssetId] = runtime.Token{
+					Id:       o.AssetId,
+					AskPrice: ap,
+					BidPrice: bp,
+				}
+			}
 
 			if e.zscore == nil {
 				e.zscore = indicators.NewZScore(60)
@@ -97,7 +126,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			return runtime.Observation{
 				At:          time.Now().Unix(),
 				MarketID:    conditionId,
-				Tokens:      e.tokens,
+				Tokens:      CopyMap(e.tokens),
 				TimeLeftSec: e.endTime/1000 - time.Now().Unix(),
 			}, true
 		}
@@ -114,6 +143,22 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 				return runtime.Observation{}, false
 			}
 
+			e.updateOrderBook(orderBook.AssetId, func(old *sdk.OrderBook) *sdk.OrderBook {
+				var new sdk.OrderBook
+				if old == nil {
+					new.AssetId = orderBook.AssetId
+					new.Market = orderBook.Market
+					new.Timestamp = orderBook.Timestamp
+					new.Asks = append([]orders.Book(nil), orderBook.Asks...)
+					new.Bids = append([]orders.Book(nil), orderBook.Bids...)
+				} else {
+					new = CopyOrderBook(*old)
+					new.Asks = append([]orders.Book(nil), orderBook.Asks...)
+					new.Bids = append([]orders.Book(nil), orderBook.Bids...)
+				}
+				return &new
+			})
+
 			if len(orderBook.Asks) > 0 {
 				token.AskPrice = orderBook.Asks[len(orderBook.Asks)-1].Price
 			}
@@ -127,6 +172,9 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			obs.MarketID = orderBook.Market
 			obs.TimeLeftSec = e.endTime/1000 - time.Now().Unix()
 			obs.Tokens = CopyMap(e.tokens)
+			obs.GetOrderBook = func(tId string) *sdk.OrderBook {
+				return e.GetOrderBook(tId)
+			}
 
 			obs.Features = make(map[string]any)
 			obs.Features["latestZ"] = e.latestZ.Load()
@@ -153,4 +201,74 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		}
 	}
 	return runtime.Observation{}, false
+}
+
+/**
+* 不要在任何地方修改返回的数据(高风险,这样做是为了高性能)
+**/
+func (e *Engine) GetOrderBook(tokenId string) *sdk.OrderBook {
+	e.booksMu.RLock()
+	v := e.books[tokenId]
+	e.booksMu.RUnlock()
+
+	if v == nil {
+		return nil
+	}
+
+	ob, _ := v.Load().(*sdk.OrderBook)
+	return ob
+}
+
+func (e *Engine) getBook(tokenId string) *atomic.Value {
+	e.booksMu.RLock()
+	v, ok := e.books[tokenId]
+	e.booksMu.RUnlock()
+
+	if ok {
+		return v
+	}
+
+	e.booksMu.Lock()
+	defer e.booksMu.Unlock()
+
+	// double check
+	if v, ok = e.books[tokenId]; ok {
+		return v
+	}
+
+	v = &atomic.Value{}
+	v.Store((*sdk.OrderBook)(nil))
+
+	e.books[tokenId] = v
+	return v
+}
+
+func (e *Engine) updateOrderBook(tokenId string, fn func(old *sdk.OrderBook) *sdk.OrderBook) {
+	v := e.getBook(tokenId)
+	if v != nil {
+		old, _ := v.Load().(*sdk.OrderBook)
+		newOB := fn(old)
+		v.Store(newOB)
+	} else {
+		newOB := fn(nil)
+		v.Store(newOB)
+	}
+}
+
+func CopyOrderBook(src sdk.OrderBook) sdk.OrderBook {
+	dst := src // 先浅拷贝一层
+
+	// 深拷贝 Bids
+	if src.Bids != nil {
+		dst.Bids = make([]orders.Book, len(src.Bids))
+		copy(dst.Bids, src.Bids)
+	}
+
+	// 深拷贝 Asks
+	if src.Asks != nil {
+		dst.Asks = make([]orders.Book, len(src.Asks))
+		copy(dst.Asks, src.Asks)
+	}
+
+	return dst
 }

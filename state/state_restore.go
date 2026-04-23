@@ -19,6 +19,7 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 	}
 
 	s.SyncBalanceOnce(ctx)
+	s.restoreClient.Redeem(ctx)
 
 	openOrders, err := s.restoreClient.GetOpenOrders()
 	if err != nil {

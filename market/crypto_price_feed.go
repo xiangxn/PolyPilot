@@ -25,7 +25,7 @@ func (c *CryptoPriceFeed) Init(bus *core.EventBus) {
 		cfg = sdk.DefaultConfig()
 	}
 
-	client := sdk.NewClient(defaultReadonlyPrivKey, cfg)
+	client := sdk.NewClient(cfg)
 	c.cryptoPriceMonitor = sdk.NewCryptoPriceMonitor(client, c.MonitorType, c.MonitoSymble)
 }
 

@@ -57,12 +57,7 @@ type Snapshot struct {
 type ExchangeStateClient interface {
 	GetOpenOrders() ([]orders.OpenOrder, error)
 	GetPositions() (*gjson.Result, error)
-}
-
-type ExchangeRestoreConfig struct {
-	Client            ExchangeStateClient
-	PositionsWallet   string
-	PositionsAPILimit int
+	Redeem(ctx context.Context)
 }
 
 type BalanceReader interface {

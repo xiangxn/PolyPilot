@@ -16,10 +16,9 @@ import (
 )
 
 type Config struct {
-	SignerKey   string               `mapstructure:"signer_key"`
-	ChainRPCURL string               `mapstructure:"chain_rpc_url"`
-	BalanceSync BalanceSyncConfig    `mapstructure:"balance_sync"`
-	Polymarket  sdk.PolymarketConfig `mapstructure:"polymarket"`
+	ChainRPCURL string            `mapstructure:"chain_rpc_url"`
+	BalanceSync BalanceSyncConfig `mapstructure:"balance_sync"`
+	SDKConfig   sdk.Config        `mapstructure:"sdk_config"`
 }
 
 type BalanceSyncConfig struct {
@@ -49,7 +48,7 @@ func Load() (Config, error) {
 	defaultSDKCfg := sdk.DefaultConfig()
 	cfg := Config{ChainRPCURL: "https://polygon.drpc.org"}
 	if defaultSDKCfg != nil {
-		cfg.Polymarket = defaultSDKCfg.Polymarket
+		cfg.SDKConfig = *defaultSDKCfg
 	}
 	if err := v.Unmarshal(&cfg, viper.DecodeHook(
 		mapstructure.StringToTimeDurationHookFunc(),
@@ -60,8 +59,8 @@ func Load() (Config, error) {
 	if err := decryptSensitiveFields(&cfg); err != nil {
 		return Config{}, err
 	}
-	if cfg.SignerKey != "" {
-		cfg.SignerKey = strings.TrimPrefix(strings.TrimSpace(cfg.SignerKey), "0x")
+	if cfg.SDKConfig.Polymarket.OwnerKey != "" {
+		cfg.SDKConfig.Polymarket.OwnerKey = strings.TrimPrefix(strings.TrimSpace(cfg.SDKConfig.Polymarket.OwnerKey), "0x")
 	}
 
 	return cfg, nil
@@ -73,7 +72,7 @@ func decryptSensitiveFields(cfg *Config) error {
 		value *string
 	}
 
-	targets := []decryptTarget{{label: "signer_key", value: &cfg.SignerKey}}
+	targets := []decryptTarget{{label: "sdk_config.polymarket.owner_key", value: &cfg.SDKConfig.Polymarket.OwnerKey}}
 	appendCredTargets := func(prefix string, creds *sdkmodel.ApiKeyCreds) {
 		if creds == nil {
 			return
@@ -84,8 +83,8 @@ func decryptSensitiveFields(cfg *Config) error {
 			decryptTarget{label: prefix + ".passphrase", value: &creds.Passphrase},
 		)
 	}
-	appendCredTargets("polymarket.clob_creds", cfg.Polymarket.CLOBCreds)
-	appendCredTargets("polymarket.builder_creds", cfg.Polymarket.BuilderCreds)
+	appendCredTargets("sdk_config.polymarket.clob_creds", cfg.SDKConfig.Polymarket.CLOBCreds)
+	appendCredTargets("sdk_config.polymarket.builder_creds", cfg.SDKConfig.Polymarket.BuilderCreds)
 
 	hasEncrypted := false
 	for i := range targets {

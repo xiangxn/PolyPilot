@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	appconfig "polypilot/internal/config"
 	utils "polypilot/internal/multicall"
@@ -45,15 +46,15 @@ func BuildMulticallBalanceSyncConfig(cfg appconfig.Config) (BalanceSyncConfig, e
 	if !cfg.BalanceSync.Enabled {
 		return BalanceSyncConfig{}, nil
 	}
-	if cfg.Polymarket.FunderAddress == "" {
+	if cfg.SDKConfig.Polymarket.FunderAddress == "" {
 		return BalanceSyncConfig{}, errors.New("missing polymarket funder address")
 	}
 
 	reader, err := NewMulticallBalanceReader(
 		cfg.ChainRPCURL,
-		big.NewInt(cfg.Polymarket.ChainID),
+		big.NewInt(cfg.SDKConfig.Polymarket.ChainID),
 		cfg.BalanceSync.CollateralToken,
-		cfg.Polymarket.FunderAddress,
+		cfg.SDKConfig.Polymarket.FunderAddress,
 	)
 	if err != nil {
 		return BalanceSyncConfig{}, fmt.Errorf("invalid balance sync config: %w", err)
@@ -79,6 +80,6 @@ func (r *MulticallBalanceReader) ReadOnchainBalance(ctx context.Context) (float6
 	if err != nil {
 		return 0, err
 	}
-
+	log.Printf("[MulticallBalanceReader] %s %f", r.wallet, info.Float())
 	return info.Float(), nil
 }
