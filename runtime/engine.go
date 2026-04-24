@@ -38,7 +38,7 @@ func (e *Engine) Start(ctx context.Context) {
 			continue
 		}
 		ob.Init(e.Bus)
-		ob.Start(ctx)
+		go ob.Start(ctx)
 	}
 	for _, feed := range e.Feeds {
 		if feed == nil {
@@ -92,10 +92,10 @@ func (e *Engine) Start(ctx context.Context) {
 		if feed == nil {
 			continue
 		}
-		feed.Start(ctx)
+		go feed.Start(ctx)
 	}
 
-	cleanupTicker := time.NewTicker(1 * time.Second)
+	cleanupTicker := time.NewTicker(6 * time.Second)
 	metricsTicker := time.NewTicker(10 * time.Second)
 	defer cleanupTicker.Stop()
 	defer metricsTicker.Stop()
