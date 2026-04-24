@@ -116,6 +116,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 							orderbook := o.GetOrderBook(downToken.Id)
 							price, err := prices.CalculateMarketPrice(*orderbook, model.SELL, downPos.Available, orders.MARKET_FAK)
 							if err == nil {
+								// 止损单
 								ins = append(ins, runtime.OrderIntent{
 									MarketID: o.MarketID,
 									TokenID:  downToken.Id,
@@ -123,6 +124,14 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 									Side:     model.SELL,
 									Size:     downPos.Available,
 								})
+								// 取消挂单
+								orderIds := buildCancelIntent(upToken.Id, stateSnap.Orders)
+								for _, oId := range orderIds {
+									ins = append(ins, runtime.OrderIntent{
+										Action:  runtime.OrderIntentActionCancel,
+										OrderID: oId,
+									})
+								}
 							} else {
 								log.Error().Err(err).Str("token_id", downToken.Id).Msg("calculate market price failed")
 							}
@@ -134,6 +143,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 							orderbook := o.GetOrderBook(upToken.Id)
 							price, err := prices.CalculateMarketPrice(*orderbook, model.SELL, upPos.Available, orders.MARKET_FAK)
 							if err == nil {
+								// 止损单
 								ins = append(ins, runtime.OrderIntent{
 									MarketID: o.MarketID,
 									TokenID:  upToken.Id,
@@ -141,6 +151,14 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 									Side:     model.SELL,
 									Size:     upPos.Available,
 								})
+								// 取消挂单
+								orderIds := buildCancelIntent(downToken.Id, stateSnap.Orders)
+								for _, oId := range orderIds {
+									ins = append(ins, runtime.OrderIntent{
+										Action:  runtime.OrderIntentActionCancel,
+										OrderID: oId,
+									})
+								}
 							} else {
 								log.Error().Err(err).Str("token_id", upToken.Id).Msg("calculate market price failed")
 							}
@@ -154,6 +172,16 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 
 	return nil
 
+}
+
+func buildCancelIntent(tokenId string, orders map[string]state.OrderReservation) []string {
+	orderIds := []string{}
+	for _, o := range orders {
+		if o.TokenID == tokenId {
+			orderIds = append(orderIds, o.OrderID)
+		}
+	}
+	return orderIds
 }
 
 func TopNGreaterThan(arr []float64, n int, threshold float64) bool {

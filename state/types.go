@@ -65,7 +65,8 @@ type Balance struct {
 type Snapshot struct {
 	Position Position
 	Balance  Balance
-	Orders   map[string]OrderReservation
+	// orderId -> orderReservation
+	Orders map[string]OrderReservation
 }
 
 type ExchangeStateClient interface {
