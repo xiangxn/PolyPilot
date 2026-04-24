@@ -135,6 +135,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 							} else {
 								log.Error().Err(err).Str("token_id", downToken.Id).Msg("calculate market price failed")
 							}
+							log.Info().Float64("LZ", latestZ).Float64("PD", latestPrice-openPrice).Float64("UpBid", upToken.BidPrice).Float64("DownBid", downToken.BidPrice).Float64("SP", price).Msg("触发止损")
 						}
 					}
 				} else { // 跌了
@@ -162,6 +163,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 							} else {
 								log.Error().Err(err).Str("token_id", upToken.Id).Msg("calculate market price failed")
 							}
+							log.Info().Float64("LZ", latestZ).Float64("PD", latestPrice-openPrice).Float64("UpBid", upToken.BidPrice).Float64("DownBid", downToken.BidPrice).Float64("SP", price).Msg("触发止损")
 						}
 					}
 				}
