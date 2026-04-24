@@ -95,8 +95,8 @@ func (e *Engine) Start(ctx context.Context) {
 		go feed.Start(ctx)
 	}
 
-	cleanupTicker := time.NewTicker(6 * time.Second)
-	metricsTicker := time.NewTicker(10 * time.Second)
+	cleanupTicker := time.NewTicker(5 * time.Second)
+	metricsTicker := time.NewTicker(1 * time.Minute)
 	defer cleanupTicker.Stop()
 	defer metricsTicker.Stop()
 
