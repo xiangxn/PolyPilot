@@ -78,8 +78,9 @@ type Engine struct {
 	Probability Probability
 	Strategies  []Strategy
 
-	PendingEventTTL   time.Duration
-	FinalizedOrderTTL time.Duration
+	PendingEventTTL      time.Duration
+	FinalizedOrderTTL    time.Duration
+	ProvisionalOrderTTL  time.Duration
 
 	ticks             atomic.Uint64
 	inputEvents       atomic.Uint64
@@ -92,7 +93,8 @@ type Engine struct {
 	riskRejected      atomic.Uint64
 	ordersSent        atomic.Uint64
 
-	orderMu sync.RWMutex
+	orderMu   sync.RWMutex
+	intentSeq atomic.Uint64
 
 	acceptedOrders map[string]struct{}
 	finalized      map[string]struct{}
@@ -116,11 +118,12 @@ type OrderIntent struct {
 	Action OrderIntentAction
 
 	// PLACE 必填
-	MarketID string
-	TokenID  string
-	Price    float64
-	Side     model.Side
-	Size     float64
+	MarketID  string
+	TokenID   string
+	Price     float64
+	Side      model.Side
+	Size      float64
+	IntentID  string
 
 	// CANCEL 必填（交易所订单 ID）
 	OrderID string

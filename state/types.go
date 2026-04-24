@@ -17,6 +17,8 @@ type State struct {
 
 	// orderId -> orderReservation
 	orderReservations map[string]OrderReservation
+	// intentId -> provisional reservation
+	provisionalReservations map[string]ProvisionalReservation
 
 	balanceSync    BalanceSyncConfig
 	balanceSyncRun sync.Once
@@ -31,6 +33,18 @@ type OrderReservation struct {
 	Price         float64
 	RemainingSize float64
 	Reserved      float64
+}
+
+type ProvisionalReservation struct {
+	IntentID      string
+	MarketID      string
+	TokenID       string
+	Side          model.Side
+	Price         float64
+	RemainingSize float64
+	Reserved      float64
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
 }
 
 type TokenPosition struct {

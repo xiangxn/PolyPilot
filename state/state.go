@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"maps"
+	"time"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 )
@@ -15,11 +16,12 @@ func NewState(balanceSync BalanceSyncConfig, restoreClient ExchangeStateClient) 
 		minBalance = 0
 	}
 	return &State{
-		position:          Position{Tokens: make(map[string]TokenPosition)},
-		balance:           Balance{Available: 0, Reserved: 0, MinBalance: minBalance},
-		orderReservations: make(map[string]OrderReservation),
-		balanceSync:       normalizeBalanceSyncConfig(balanceSync),
-		restoreClient:     restoreClient,
+		position:                Position{Tokens: make(map[string]TokenPosition)},
+		balance:                 Balance{Available: 0, Reserved: 0, MinBalance: minBalance},
+		orderReservations:       make(map[string]OrderReservation),
+		provisionalReservations: make(map[string]ProvisionalReservation),
+		balanceSync:             normalizeBalanceSyncConfig(balanceSync),
+		restoreClient:           restoreClient,
 	}
 }
 
@@ -49,6 +51,7 @@ func (s *State) Restore(snapshot Snapshot) {
 
 	s.balance = Balance{Available: snapshot.Balance.Available, Reserved: snapshot.Balance.Reserved, MinBalance: snapshot.Balance.MinBalance}
 	s.orderReservations = make(map[string]OrderReservation, len(snapshot.Orders))
+	s.provisionalReservations = make(map[string]ProvisionalReservation)
 	for _, r := range snapshot.Orders {
 		if r.OrderID == "" {
 			continue
@@ -73,6 +76,168 @@ func (s *State) Restore(snapshot Snapshot) {
 			s.position.Tokens[k] = tp
 		}
 	}
+}
+
+func (s *State) TryReserveProvisional(intentID, marketID, tokenID string, side model.Side, price, requestedSize float64, now time.Time, ttl time.Duration) error {
+	if intentID == "" {
+		return errors.New("empty intent id")
+	}
+	if marketID == "" {
+		return errors.New("empty market id")
+	}
+	if tokenID == "" {
+		return errors.New("empty token id")
+	}
+	if requestedSize <= 0 {
+		return errors.New("invalid requested size")
+	}
+	if price <= 0 || price >= 1 {
+		return errors.New("invalid price")
+	}
+	if side != model.BUY && side != model.SELL {
+		return errors.New("invalid side")
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if ttl <= 0 {
+		ttl = 5 * time.Second
+	}
+
+	reservedAmount := requiredCollateral(side, price, requestedSize)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.provisionalReservations[intentID]; exists {
+		return errors.New("intent already reserved")
+	}
+
+	s.ensureTokenPositions()
+	if side == model.BUY {
+		if s.balance.Available+floatEpsilon < reservedAmount {
+			return errors.New("insufficient available balance for provisional reserve")
+		}
+		s.balance.Available -= reservedAmount
+		s.balance.Reserved += reservedAmount
+	} else {
+		k := tokenKey(tokenID)
+		tp := s.position.Tokens[k]
+		if tp.Available+floatEpsilon < requestedSize {
+			return errors.New("insufficient token position for provisional sell reserve")
+		}
+		tp.Available -= requestedSize
+		tp.Reserved += requestedSize
+		if tp.Available < 0 {
+			tp.Available = 0
+		}
+		s.position.Tokens[k] = tp
+	}
+
+	s.provisionalReservations[intentID] = ProvisionalReservation{
+		IntentID:      intentID,
+		MarketID:      marketID,
+		TokenID:       tokenID,
+		Side:          side,
+		Price:         price,
+		RemainingSize: requestedSize,
+		Reserved:      reservedAmount,
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(ttl),
+	}
+
+	return nil
+}
+
+func (s *State) ConfirmProvisional(intentID, orderID string) (bool, error) {
+	if intentID == "" {
+		return false, errors.New("empty intent id")
+	}
+	if orderID == "" {
+		return false, errors.New("empty order id")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, exists := s.provisionalReservations[intentID]
+	if !exists {
+		if _, ok := s.orderReservations[orderID]; ok {
+			return true, nil
+		}
+		return false, nil
+	}
+	delete(s.provisionalReservations, intentID)
+
+	if _, exists := s.orderReservations[orderID]; exists {
+		return true, nil
+	}
+
+	s.orderReservations[orderID] = OrderReservation{
+		OrderID:       orderID,
+		MarketID:      p.MarketID,
+		TokenID:       p.TokenID,
+		Side:          p.Side,
+		Price:         p.Price,
+		RemainingSize: p.RemainingSize,
+		Reserved:      p.Reserved,
+	}
+	return true, nil
+}
+
+func (s *State) ReleaseProvisional(intentID string) bool {
+	if intentID == "" {
+		return false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, exists := s.provisionalReservations[intentID]
+	if !exists {
+		return false
+	}
+	delete(s.provisionalReservations, intentID)
+
+	s.ensureTokenPositions()
+	s.releaseReservedLocked(p.Side, p.TokenID, p.Reserved)
+	return true
+}
+
+func (s *State) CleanupExpiredProvisional(now time.Time) []string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	type expired struct {
+		id   string
+		side model.Side
+		token string
+		reserved float64
+	}
+
+	expiredItems := make([]expired, 0)
+	s.mu.Lock()
+	for intentID, p := range s.provisionalReservations {
+		if now.Before(p.ExpiresAt) {
+			continue
+		}
+		delete(s.provisionalReservations, intentID)
+		expiredItems = append(expiredItems, expired{id: intentID, side: p.Side, token: p.TokenID, reserved: p.Reserved})
+	}
+	if len(expiredItems) > 0 {
+		s.ensureTokenPositions()
+		for _, item := range expiredItems {
+			s.releaseReservedLocked(item.side, item.token, item.reserved)
+		}
+	}
+	s.mu.Unlock()
+
+	ids := make([]string, 0, len(expiredItems))
+	for _, item := range expiredItems {
+		ids = append(ids, item.id)
+	}
+	return ids
 }
 
 func (s *State) ReserveOrder(orderID, marketID, tokenID string, side model.Side, price, requestedSize float64) error {
@@ -247,6 +412,26 @@ func (s *State) ReleaseOrder(orderID string) {
 	}
 
 	delete(s.orderReservations, orderID)
+}
+
+func (s *State) releaseReservedLocked(side model.Side, tokenID string, reserved float64) {
+	switch side {
+	case model.BUY:
+		s.balance.Reserved -= reserved
+		s.balance.Available += reserved
+		if s.balance.Reserved < 0 {
+			s.balance.Reserved = 0
+		}
+	case model.SELL:
+		k := tokenKey(tokenID)
+		tp := s.position.Tokens[k]
+		tp.Reserved -= reserved
+		tp.Available += reserved
+		if tp.Reserved < 0 {
+			tp.Reserved = 0
+		}
+		s.position.Tokens[k] = tp
+	}
 }
 
 func (s *State) ReconcileOnchainBalance(onchainTotal float64, epsilon float64) (changed bool, drift float64) {

@@ -109,6 +109,7 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 		case runtime.OrderIntentActionPlace:
 			if err := validatePlacement(in); err != nil {
 				e.publish(core.ExecutionEvent{
+					ParentOrderID: in.IntentID,
 					MarketID:      in.MarketID,
 					TokenID:       in.TokenID,
 					Price:         in.Price,
@@ -129,6 +130,7 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 			validated = append(validated, in)
 		default:
 			e.publish(core.ExecutionEvent{
+				ParentOrderID: in.IntentID,
 				MarketID:      in.MarketID,
 				TokenID:       in.TokenID,
 				Price:         in.Price,
@@ -190,6 +192,7 @@ func (e *Executor) rejectBatch(intents []runtime.OrderIntent, reason string) {
 	now := time.Now()
 	for _, in := range intents {
 		ev := core.ExecutionEvent{
+			ParentOrderID: in.IntentID,
 			MarketID:      in.MarketID,
 			TokenID:       in.TokenID,
 			Price:         in.Price,
@@ -226,6 +229,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 		}, orders.CreateOrderOptions{SignatureType: &signatureType})
 		if err != nil {
 			e.publish(core.ExecutionEvent{
+				ParentOrderID: in.IntentID,
 				MarketID:      in.MarketID,
 				TokenID:       in.TokenID,
 				Price:         in.Price,
@@ -254,8 +258,10 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 		results, err := e.Client.PostOrders(args, e.DeferExec)
 		log.Printf("[Executor] 下单返回: %d", time.Now().UnixMilli())
 		if err != nil {
+			now := time.Now()
 			for _, po := range preparedOrders {
 				e.publish(core.ExecutionEvent{
+					ParentOrderID: po.intent.IntentID,
 					MarketID:      po.intent.MarketID,
 					TokenID:       po.intent.TokenID,
 					Price:         po.intent.Price,
@@ -263,26 +269,61 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 					RequestedSize: po.intent.Size,
 					Status:        core.ExecutionStatusRejected,
 					Reason:        fmt.Sprintf("post orders failed: %v", err),
-					At:            time.Now(),
+					At:            now,
 				})
 			}
-		} else {
-			for i, result := range results.Array() {
-				errorMsg := result.Get("errorMsg").String()
-				if errorMsg != "" {
-					po := preparedOrders[i]
-					e.publish(core.ExecutionEvent{
-						MarketID:      po.intent.MarketID,
-						TokenID:       po.intent.TokenID,
-						Price:         po.intent.Price,
-						Side:          po.intent.Side,
-						RequestedSize: po.intent.Size,
-						Status:        core.ExecutionStatusRejected,
-						Reason:        fmt.Sprintf("post orders failed: %s", errorMsg),
-						At:            time.Now(),
-					})
-				}
+			return
+		}
+
+		resultsArray := results.Array()
+		for i, po := range preparedOrders {
+			if i >= len(resultsArray) {
+				e.publish(core.ExecutionEvent{
+					ParentOrderID: po.intent.IntentID,
+					MarketID:      po.intent.MarketID,
+					TokenID:       po.intent.TokenID,
+					Price:         po.intent.Price,
+					Side:          po.intent.Side,
+					RequestedSize: po.intent.Size,
+					Status:        core.ExecutionStatusRejected,
+					Reason:        "post orders failed: missing result item",
+					At:            time.Now(),
+				})
+				continue
 			}
+			result := resultsArray[i]
+			errorMsg := result.Get("errorMsg").String()
+			if errorMsg != "" {
+				e.publish(core.ExecutionEvent{
+					ParentOrderID: po.intent.IntentID,
+					MarketID:      po.intent.MarketID,
+					TokenID:       po.intent.TokenID,
+					Price:         po.intent.Price,
+					Side:          po.intent.Side,
+					RequestedSize: po.intent.Size,
+					Status:        core.ExecutionStatusRejected,
+					Reason:        fmt.Sprintf("post orders failed: %s", errorMsg),
+					At:            time.Now(),
+				})
+				continue
+			}
+			orderID := strings.TrimSpace(result.Get("orderID").String())
+			if orderID == "" {
+				e.publish(core.ExecutionEvent{
+					ParentOrderID: po.intent.IntentID,
+					MarketID:      po.intent.MarketID,
+					TokenID:       po.intent.TokenID,
+					Price:         po.intent.Price,
+					Side:          po.intent.Side,
+					RequestedSize: po.intent.Size,
+					Status:        core.ExecutionStatusRejected,
+					Reason:        "post orders failed: empty order id",
+					At:            time.Now(),
+				})
+				continue
+			}
+			e.trackPostedOrder(orderID, po.intent)
+			e.publishAcceptedFromPost(po.intent, orderID, time.Now())
 		}
 		return
 	}
@@ -293,6 +334,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	log.Printf("[Executor] 下单返回: %d", time.Now().UnixMilli())
 	if err != nil {
 		e.publish(core.ExecutionEvent{
+			ParentOrderID: single.intent.IntentID,
 			MarketID:      single.intent.MarketID,
 			TokenID:       single.intent.TokenID,
 			Price:         single.intent.Price,
@@ -308,6 +350,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	errorMsg := result.Get("errorMsg").String()
 	if errorMsg != "" {
 		e.publish(core.ExecutionEvent{
+			ParentOrderID: single.intent.IntentID,
 			MarketID:      single.intent.MarketID,
 			TokenID:       single.intent.TokenID,
 			Price:         single.intent.Price,
@@ -317,7 +360,59 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			Reason:        fmt.Sprintf("post order failed: %s", errorMsg),
 			At:            time.Now(),
 		})
+		return
 	}
+	orderID := strings.TrimSpace(result.Get("orderID").String())
+	if orderID == "" {
+		e.publish(core.ExecutionEvent{
+			ParentOrderID: single.intent.IntentID,
+			MarketID:      single.intent.MarketID,
+			TokenID:       single.intent.TokenID,
+			Price:         single.intent.Price,
+			Side:          single.intent.Side,
+			RequestedSize: single.intent.Size,
+			Status:        core.ExecutionStatusRejected,
+			Reason:        "post order failed: empty order id",
+			At:            time.Now(),
+		})
+		return
+	}
+	e.trackPostedOrder(orderID, single.intent)
+	e.publishAcceptedFromPost(single.intent, orderID, time.Now())
+}
+
+func (e *Executor) trackPostedOrder(orderID string, in runtime.OrderIntent) {
+	if strings.TrimSpace(orderID) == "" {
+		return
+	}
+	e.mu.Lock()
+	t := e.getOrCreateTracked(orderID)
+	t.MarketID = firstNonEmpty(in.MarketID, t.MarketID)
+	t.TokenID = firstNonEmpty(in.TokenID, t.TokenID)
+	t.Side = in.Side
+	if in.Price > 0 {
+		t.Price = in.Price
+	}
+	if in.Size > 0 {
+		t.RequestedSize = in.Size
+	}
+	t.Accepted = true
+	e.mu.Unlock()
+}
+
+func (e *Executor) publishAcceptedFromPost(in runtime.OrderIntent, orderID string, at time.Time) {
+	e.publish(core.ExecutionEvent{
+		ParentOrderID: in.IntentID,
+		OrderID:       orderID,
+		MarketID:      in.MarketID,
+		TokenID:       in.TokenID,
+		Price:         in.Price,
+		Side:          in.Side,
+		RequestedSize: in.Size,
+		FilledSize:    0,
+		Status:        core.ExecutionStatusAccepted,
+		At:            at,
+	})
 }
 
 func (e *Executor) submitCancels(intents []runtime.OrderIntent) {

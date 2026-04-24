@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	defaultPendingEventTTL   = 30 * time.Second
-	defaultFinalizedOrderTTL = 10 * time.Minute
+	defaultPendingEventTTL     = 30 * time.Second
+	defaultFinalizedOrderTTL   = 10 * time.Minute
+	defaultProvisionalOrderTTL = 5 * time.Second
 )
 
 func (e *Engine) Start(ctx context.Context) {
@@ -156,8 +157,34 @@ func (e *Engine) handleInputUpdate(ev core.Event) {
 			return
 		}
 
-		e.ordersSent.Add(uint64(len(intents)))
-		e.Exec.Execute(intents)
+		submit := make([]OrderIntent, 0, len(intents))
+		now := time.Now()
+		for _, in := range intents {
+			action := in.Action
+			if action == "" {
+				action = OrderIntentActionPlace
+				in.Action = action
+			}
+			if action != OrderIntentActionPlace {
+				submit = append(submit, in)
+				continue
+			}
+			if in.IntentID == "" {
+				in.IntentID = e.nextIntentID()
+			}
+			if err := e.State.TryReserveProvisional(in.IntentID, in.MarketID, in.TokenID, in.Side, in.Price, in.Size, now, e.ProvisionalOrderTTL); err != nil {
+				e.riskRejected.Add(1)
+				e.publishRisk(fmt.Sprintf("provisional reserve failed intent=%s reason=%s", in.IntentID, err.Error()))
+				continue
+			}
+			submit = append(submit, in)
+		}
+		if len(submit) == 0 {
+			continue
+		}
+
+		e.ordersSent.Add(uint64(len(submit)))
+		e.Exec.Execute(submit)
 	}
 
 }
@@ -168,6 +195,9 @@ func (e *Engine) initOrderTracking() {
 	}
 	if e.FinalizedOrderTTL <= 0 {
 		e.FinalizedOrderTTL = defaultFinalizedOrderTTL
+	}
+	if e.ProvisionalOrderTTL <= 0 {
+		e.ProvisionalOrderTTL = defaultProvisionalOrderTTL
 	}
 	if e.acceptedOrders == nil {
 		e.acceptedOrders = make(map[string]struct{})
@@ -189,9 +219,14 @@ func (e *Engine) handleExecutionEvent(data core.ExecutionEvent, count bool) {
 	}
 
 	if data.OrderID == "" {
-		if data.Status == core.ExecutionStatusRejected && data.Reason != "" {
+		if data.Status == core.ExecutionStatusRejected {
 			e.executionRejected.Add(1)
-			e.publishRisk(fmt.Sprintf("execution rejected reason=%s", data.Reason))
+			if data.ParentOrderID != "" {
+				e.State.ReleaseProvisional(data.ParentOrderID)
+			}
+			if data.Reason != "" {
+				e.publishRisk(fmt.Sprintf("execution rejected reason=%s", data.Reason))
+			}
 		}
 		return
 	}
@@ -204,8 +239,19 @@ func (e *Engine) handleExecutionEvent(data core.ExecutionEvent, count bool) {
 	case core.ExecutionStatusAccepted:
 		e.executionAccepted.Add(1)
 		e.markAccepted(data.OrderID)
-		if err := e.State.ReserveOrder(data.OrderID, data.MarketID, data.TokenID, data.Side, data.Price, data.RequestedSize); err != nil && err.Error() != "order already reserved" {
-			e.publishRisk(fmt.Sprintf("reserve failed order=%s reason=%s", data.OrderID, err.Error()))
+		confirmed := false
+		if data.ParentOrderID != "" {
+			ok, err := e.State.ConfirmProvisional(data.ParentOrderID, data.OrderID)
+			if err != nil {
+				e.publishRisk(fmt.Sprintf("confirm provisional failed intent=%s order=%s reason=%s", data.ParentOrderID, data.OrderID, err.Error()))
+			} else {
+				confirmed = ok
+			}
+		}
+		if !confirmed {
+			if err := e.State.ReserveOrder(data.OrderID, data.MarketID, data.TokenID, data.Side, data.Price, data.RequestedSize); err != nil && err.Error() != "order already reserved" {
+				e.publishRisk(fmt.Sprintf("reserve failed order=%s reason=%s", data.OrderID, err.Error()))
+			}
 		}
 		e.replayPending(data.OrderID)
 
@@ -235,6 +281,9 @@ func (e *Engine) handleExecutionEvent(data core.ExecutionEvent, count bool) {
 
 	case core.ExecutionStatusRejected:
 		e.executionRejected.Add(1)
+		if data.ParentOrderID != "" {
+			e.State.ReleaseProvisional(data.ParentOrderID)
+		}
 		if e.hasAccepted(data.OrderID) {
 			e.State.ReleaseOrder(data.OrderID)
 		}
@@ -296,6 +345,7 @@ func (e *Engine) replayPending(orderID string) {
 func (e *Engine) cleanupTracking(now time.Time) {
 	e.cleanupExpiredPending(now)
 	e.cleanupExpiredFinalized(now)
+	e.cleanupExpiredProvisional(now)
 }
 
 func (e *Engine) cleanupExpiredPending(now time.Time) {
@@ -364,6 +414,18 @@ func (e *Engine) restoreOpenOrdersTrackingByIDs(orderIDs []string) {
 		}
 		e.markAccepted(orderID)
 	}
+}
+
+func (e *Engine) cleanupExpiredProvisional(now time.Time) {
+	expired := e.State.CleanupExpiredProvisional(now)
+	for _, intentID := range expired {
+		e.publishRisk(fmt.Sprintf("release expired provisional reserve intent=%s", intentID))
+	}
+}
+
+func (e *Engine) nextIntentID() string {
+	seq := e.intentSeq.Add(1)
+	return fmt.Sprintf("intent-%d-%d", time.Now().UnixNano(), seq)
 }
 
 func requiredReservedForOrder(side model.Side, price, size float64) float64 {
