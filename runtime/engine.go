@@ -262,7 +262,7 @@ func (e *Engine) handleExecutionEvent(data core.ExecutionEvent, count bool) {
 		}
 		e.executionFilled.Add(1)
 		if data.FilledSize > 0 {
-			if err := e.State.ApplyFill(data.OrderID, data.MarketID, data.TokenID, data.Side, data.FilledSize); err != nil {
+			if err := e.State.ApplyFill(data.OrderID, data.MarketID, data.TokenID, data.Side, data.FilledSize, data.Price); err != nil {
 				e.publishRisk(fmt.Sprintf("fill apply failed order=%s reason=%s", data.OrderID, err.Error()))
 				return
 			}

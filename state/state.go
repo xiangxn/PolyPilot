@@ -210,9 +210,9 @@ func (s *State) CleanupExpiredProvisional(now time.Time) []string {
 	}
 
 	type expired struct {
-		id   string
-		side model.Side
-		token string
+		id       string
+		side     model.Side
+		token    string
 		reserved float64
 	}
 
@@ -303,7 +303,7 @@ func (s *State) ReserveOrder(orderID, marketID, tokenID string, side model.Side,
 	return nil
 }
 
-func (s *State) ApplyFill(orderID, marketID, tokenID string, side model.Side, filledSize float64) error {
+func (s *State) ApplyFill(orderID, marketID, tokenID string, side model.Side, filledSize, fillPrice float64) error {
 	if orderID == "" {
 		return errors.New("empty order id")
 	}
@@ -330,8 +330,11 @@ func (s *State) ApplyFill(orderID, marketID, tokenID string, side model.Side, fi
 	if filledSize > res.RemainingSize+floatEpsilon {
 		return errors.New("filled size exceeds remaining size")
 	}
+	if fillPrice <= 0 { // 需要实测是否需要回退使用res.Price
+		fillPrice = res.Price
+	}
 
-	consumed := requiredCollateral(side, res.Price, filledSize)
+	consumed := requiredCollateral(side, fillPrice, filledSize)
 	if consumed > res.Reserved {
 		consumed = res.Reserved
 	}
@@ -366,7 +369,7 @@ func (s *State) ApplyFill(orderID, marketID, tokenID string, side model.Side, fi
 		}
 		s.position.Tokens[k] = tp
 
-		proceeds := res.Price * filledSize
+		proceeds := fillPrice * filledSize
 		s.balance.Available += proceeds
 	}
 

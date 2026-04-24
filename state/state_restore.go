@@ -19,15 +19,16 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 	}
 
 	s.SyncBalanceOnce(ctx)
-	s.restoreClient.Redeem(ctx)
 
 	openOrders, err := s.restoreClient.GetOpenOrders()
 	if err != nil {
+		s.restoreClient.Redeem(ctx)
 		return nil, fmt.Errorf("fetch open orders failed: %w", err)
 	}
 
 	positions, err := s.restoreClient.GetPositions()
 	if err != nil {
+		s.restoreClient.Redeem(ctx)
 		return nil, fmt.Errorf("fetch positions failed: %w", err)
 	}
 
@@ -111,6 +112,8 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 		},
 		Orders: mapReservationsByID(reservations),
 	})
+
+	s.restoreClient.Redeem(ctx)
 
 	return orderIDs, nil
 }
