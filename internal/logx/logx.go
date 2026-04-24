@@ -18,6 +18,7 @@ type LoggingConfig struct {
 	MaxSizeMB        int64  `mapstructure:"max_size_mb"`
 	MaxBackups       int    `mapstructure:"max_backups"`
 	LocalTime        bool   `mapstructure:"local_time"`
+	TimeFormat       string `mapstructure:"time_format"`
 	AsyncChannelSize uint   `mapstructure:"async_channel_size"`
 	DiscardOnFull    bool   `mapstructure:"discard_on_full"`
 	EnableCaller     bool   `mapstructure:"enable_caller"`
@@ -31,6 +32,7 @@ func DefaultConfig() LoggingConfig {
 		MaxSizeMB:        256,
 		MaxBackups:       14,
 		LocalTime:        true,
+		TimeFormat:       "20060102",
 		AsyncChannelSize: 16384,
 		DiscardOnFull:    false,
 		EnableCaller:     false,
@@ -78,6 +80,7 @@ func Init(opt LoggingConfig) error {
 		MaxSize:      opt.MaxSizeMB * 1024 * 1024,
 		MaxBackups:   opt.MaxBackups,
 		LocalTime:    opt.LocalTime,
+		TimeFormat:   opt.TimeFormat,
 		EnsureFolder: true,
 	}
 	aw := &phuslog.AsyncWriter{
