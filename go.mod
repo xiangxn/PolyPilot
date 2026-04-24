@@ -6,6 +6,7 @@ require (
 	github.com/ethereum/go-ethereum v1.16.1
 	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/joho/godotenv v1.5.1
+	github.com/phuslu/log v1.0.124
 	github.com/polymarket/go-order-utils v1.22.6
 	github.com/spf13/viper v1.20.1
 	github.com/tidwall/gjson v1.18.0
@@ -52,7 +53,6 @@ require (
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
-	github.com/phuslu/log v1.0.124 // indirect
 	github.com/pion/dtls/v2 v2.2.7 // indirect
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/stun/v2 v2.0.0 // indirect
