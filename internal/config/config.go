@@ -118,7 +118,11 @@ func decryptSensitiveFields(cfg *Config) error {
 }
 
 func readDecryptPassword() (string, error) {
-	fmt.Fprint(os.Stdout, "请输入配置解密密码: ")
+	if envPassword := strings.TrimSpace(os.Getenv("PM_CONFIG_DECRYPT_PASSWORD")); envPassword != "" {
+		return envPassword, nil
+	}
+
+	fmt.Fprint(os.Stdout, "请输入启动密码: ")
 	passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Fprintln(os.Stdout)
 	if err != nil {
