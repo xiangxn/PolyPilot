@@ -109,10 +109,21 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 			Reserved:   reserved,
 			MinBalance: minBalance,
 		},
-		Orders: cloneOrderReservations(s.orderReservations),
+		Orders: mapReservationsByID(reservations),
 	})
 
 	return orderIDs, nil
+}
+
+func mapReservationsByID(reservations []OrderReservation) map[string]OrderReservation {
+	out := make(map[string]OrderReservation, len(reservations))
+	for _, r := range reservations {
+		if strings.TrimSpace(r.OrderID) == "" {
+			continue
+		}
+		out[r.OrderID] = r
+	}
+	return out
 }
 
 func parseOpenOrderSide(side string) (model.Side, bool) {

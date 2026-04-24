@@ -302,8 +302,11 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			Reason:        fmt.Sprintf("post order failed: %v", err),
 			At:            time.Now(),
 		})
-	} else {
-		errorMsg := result.Get("errorMsg").String()
+		return
+	}
+
+	errorMsg := result.Get("errorMsg").String()
+	if errorMsg != "" {
 		e.publish(core.ExecutionEvent{
 			MarketID:      single.intent.MarketID,
 			TokenID:       single.intent.TokenID,

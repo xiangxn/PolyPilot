@@ -34,7 +34,16 @@ func (p *PolymarketStateClient) GetOpenOrders() ([]orders.OpenOrder, error) {
 }
 
 func (p *PolymarketStateClient) GetPositions() (*gjson.Result, error) {
-	return p.Client.SearchPositions("", false, positionsAPILimit(p.PositionLimits))
+	if p == nil || p.Client == nil {
+		return nil, fmt.Errorf("polymarket client is nil")
+	}
+	if p.SDKConfig == nil {
+		return nil, fmt.Errorf("sdk config is nil")
+	}
+	if p.SDKConfig.FunderAddress == "" {
+		return nil, fmt.Errorf("FUNDERADDRESS is empty")
+	}
+	return p.Client.SearchPositions(p.SDKConfig.FunderAddress, false, positionsAPILimit(p.PositionLimits))
 }
 
 func (p *PolymarketStateClient) Redeem(ctx context.Context) {
