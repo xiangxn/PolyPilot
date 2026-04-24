@@ -492,7 +492,7 @@ func (e *Executor) handleTradeEvent(ev sdk.TradeEvent) {
 }
 
 func (e *Executor) onOrderEvent(o *sdkmodel.WSOrder) {
-	if o == nil || strings.TrimSpace(o.Id) == "" {
+	if o == nil || strings.TrimSpace(o.Id) == "" || o.Owner != e.Config.Polymarket.CLOBCreds.Key {
 		return
 	}
 
@@ -563,7 +563,7 @@ func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
 	}
 
 	fills := make([]fill, 0, 1+len(ti.MakerOrders))
-	if side, ok := parseSide(ti.Side); ok && strings.TrimSpace(ti.TakerOrderId) != "" {
+	if side, ok := parseSide(ti.Side); ok && strings.TrimSpace(ti.TakerOrderId) != "" && ti.Owner == e.Config.Polymarket.CLOBCreds.Key {
 		fills = append(fills, fill{
 			orderID: ti.TakerOrderId,
 			market:  ti.Market,
@@ -575,7 +575,7 @@ func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
 	}
 	for _, mo := range ti.MakerOrders {
 		side, ok := parseSide(mo.Side)
-		if !ok || strings.TrimSpace(mo.OrderId) == "" {
+		if !ok || strings.TrimSpace(mo.OrderId) == "" || mo.Owner != e.Config.Polymarket.CLOBCreds.Key {
 			continue
 		}
 		fills = append(fills, fill{
