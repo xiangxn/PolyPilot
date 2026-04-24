@@ -38,18 +38,21 @@ func (c *CryptoPriceFeed) Start(ctx context.Context) {
 
 	go c.cryptoPriceMonitor.Run(ctx)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data, ok := <-priceCh:
-			// log.Printf("data: %+v", data)
-			if ok {
-				c.Bus.Publish(core.Event{
-					Type: core.EventSignal,
-					Data: data,
-				})
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case data, ok := <-priceCh:
+				// log.Printf("data: %+v", data)
+				if ok {
+					c.Bus.Publish(core.Event{
+						Type: core.EventSignal,
+						Data: data,
+					})
+				}
 			}
 		}
-	}
+	}()
+
 }
