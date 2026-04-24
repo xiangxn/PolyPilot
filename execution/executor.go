@@ -492,7 +492,7 @@ func (e *Executor) handleTradeEvent(ev sdk.TradeEvent) {
 }
 
 func (e *Executor) onOrderEvent(o *sdkmodel.WSOrder) {
-	if o == nil || strings.TrimSpace(o.Id) == "" || o.Owner != e.Config.Polymarket.CLOBCreds.Key {
+	if o == nil || strings.TrimSpace(o.Id) == "" || !e.isOwnOwner(o.Owner) {
 		return
 	}
 
@@ -563,7 +563,7 @@ func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
 	}
 
 	fills := make([]fill, 0, 1+len(ti.MakerOrders))
-	if side, ok := parseSide(ti.Side); ok && strings.TrimSpace(ti.TakerOrderId) != "" && ti.Owner == e.Config.Polymarket.CLOBCreds.Key {
+	if side, ok := parseSide(ti.Side); ok && strings.TrimSpace(ti.TakerOrderId) != "" && e.isOwnOwner(ti.Owner) {
 		fills = append(fills, fill{
 			orderID: ti.TakerOrderId,
 			market:  ti.Market,
@@ -575,7 +575,7 @@ func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
 	}
 	for _, mo := range ti.MakerOrders {
 		side, ok := parseSide(mo.Side)
-		if !ok || strings.TrimSpace(mo.OrderId) == "" || mo.Owner != e.Config.Polymarket.CLOBCreds.Key {
+		if !ok || strings.TrimSpace(mo.OrderId) == "" || !e.isOwnOwner(mo.Owner) {
 			continue
 		}
 		fills = append(fills, fill{
@@ -717,6 +717,21 @@ func (e *Executor) publish(data core.ExecutionEvent) {
 	if e.Bus != nil {
 		e.Bus.Publish(core.Event{Type: core.EventExecution, Data: data})
 	}
+}
+
+func (e *Executor) ownKey() string {
+	if e == nil || e.Config == nil {
+		return ""
+	}
+	return strings.TrimSpace(e.Config.Polymarket.CLOBCreds.Key)
+}
+
+func (e *Executor) isOwnOwner(owner string) bool {
+	key := e.ownKey()
+	if key == "" {
+		return true
+	}
+	return strings.TrimSpace(owner) == key
 }
 
 func validatePlacement(in runtime.OrderIntent) error {
