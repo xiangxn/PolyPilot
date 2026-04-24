@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	phuslog "github.com/phuslu/log"
@@ -40,10 +41,15 @@ type moduleLogger struct {
 	name string
 }
 
+type safeAsyncWriter struct {
+	inner  *phuslog.AsyncWriter
+	closed atomic.Bool
+}
+
 var (
 	defaultLogger phuslog.Logger
 	fileWriter    *phuslog.FileWriter
-	closer        interface{ Close() error }
+	closer        *safeAsyncWriter
 	moduleCache   sync.Map
 )
 
@@ -80,13 +86,14 @@ func Init(opt LoggingConfig) error {
 		DiscardOnFull: opt.DiscardOnFull,
 	}
 
+	safeWriter := &safeAsyncWriter{inner: aw}
 	defaultLogger = phuslog.Logger{
 		Level:  parseLevel(opt.Level),
 		Caller: boolToInt(opt.EnableCaller),
-		Writer: aw,
+		Writer: safeWriter,
 	}
 	fileWriter = fw
-	closer = aw
+	closer = safeWriter
 	moduleCache = sync.Map{}
 	return nil
 }
@@ -96,6 +103,28 @@ func Close() error {
 		return closer.Close()
 	}
 	return nil
+}
+
+func (w *safeAsyncWriter) WriteEntry(e *phuslog.Entry) (n int, err error) {
+	if w == nil || w.closed.Load() {
+		return 0, nil
+	}
+	defer func() {
+		if recover() != nil {
+			n, err = 0, nil
+		}
+	}()
+	return w.inner.WriteEntry(e)
+}
+
+func (w *safeAsyncWriter) Close() error {
+	if w == nil {
+		return nil
+	}
+	if !w.closed.CompareAndSwap(false, true) {
+		return nil
+	}
+	return w.inner.Close()
 }
 
 func StartDailyRotate(ctx context.Context, loc *time.Location) {
