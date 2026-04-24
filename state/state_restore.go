@@ -22,13 +22,13 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 
 	openOrders, err := s.restoreClient.GetOpenOrders()
 	if err != nil {
-		s.restoreClient.Redeem(ctx)
+		s.restoreClient.Redeem(ctx, s.onRedeemSuccess)
 		return nil, fmt.Errorf("fetch open orders failed: %w", err)
 	}
 
 	positions, err := s.restoreClient.GetPositions()
 	if err != nil {
-		s.restoreClient.Redeem(ctx)
+		s.restoreClient.Redeem(ctx, s.onRedeemSuccess)
 		return nil, fmt.Errorf("fetch positions failed: %w", err)
 	}
 
@@ -113,9 +113,18 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 		Orders: mapReservationsByID(reservations),
 	})
 
-	s.restoreClient.Redeem(ctx)
+	s.restoreClient.Redeem(ctx, s.onRedeemSuccess)
 
 	return orderIDs, nil
+}
+
+func (s *State) onRedeemSuccess(tokenIDs []string) {
+	if s == nil || len(tokenIDs) == 0 {
+		return
+	}
+
+	s.ClearRedeemedPositions(tokenIDs)
+	log.Info().Int("token_ids", len(tokenIDs)).Msg("positions cleared after redeem")
 }
 
 func mapReservationsByID(reservations []OrderReservation) map[string]OrderReservation {

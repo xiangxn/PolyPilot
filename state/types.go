@@ -71,7 +71,7 @@ type Snapshot struct {
 type ExchangeStateClient interface {
 	GetOpenOrders() ([]orders.OpenOrder, error)
 	GetPositions() (*gjson.Result, error)
-	Redeem(ctx context.Context)
+	Redeem(ctx context.Context, onRedeemSuccess func(tokenIDs []string))
 }
 
 type BalanceReader interface {

@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
@@ -415,6 +416,26 @@ func (s *State) ReleaseOrder(orderID string) {
 	}
 
 	delete(s.orderReservations, orderID)
+}
+
+func (s *State) ClearRedeemedPositions(tokenIDs []string) {
+	if len(tokenIDs) == 0 {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.position.Tokens) == 0 {
+		return
+	}
+	for _, tokenID := range tokenIDs {
+		k := tokenKey(strings.TrimSpace(tokenID))
+		if k == "" {
+			continue
+		}
+		delete(s.position.Tokens, k)
+	}
 }
 
 func (s *State) releaseReservedLocked(side model.Side, tokenID string, reserved float64) {

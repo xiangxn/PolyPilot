@@ -45,14 +45,19 @@ func (p *PolymarketStateClient) GetPositions() (*gjson.Result, error) {
 	return p.Client.SearchPositions(p.SDKConfig.FunderAddress, false, positionsAPILimit(p.PositionLimits))
 }
 
-func (p *PolymarketStateClient) Redeem(ctx context.Context) {
+func (p *PolymarketStateClient) Redeem(ctx context.Context, onRedeemSuccess func(tokenIDs []string)) {
 	go func() {
 		log.Info().Msg("redeem loop start")
 		defer log.Info().Msg("redeem loop exit")
 
 		run := func() {
-			if err := p.redeemOnce(); err != nil {
+			tokenIDs, err := p.redeemOnce()
+			if err != nil {
 				log.Error().Err(err).Msg("redeem failed")
+				return
+			}
+			if len(tokenIDs) > 0 && onRedeemSuccess != nil {
+				onRedeemSuccess(tokenIDs)
 			}
 		}
 
@@ -71,41 +76,60 @@ func (p *PolymarketStateClient) Redeem(ctx context.Context) {
 	}()
 }
 
-func (p *PolymarketStateClient) redeemOnce() error {
+func (p *PolymarketStateClient) redeemOnce() ([]string, error) {
 	if p.Client == nil {
-		return fmt.Errorf("polymarket client is nil")
+		return nil, fmt.Errorf("polymarket client is nil")
 	}
 
 	if p.SDKConfig.FunderAddress == "" {
-		return fmt.Errorf("FUNDERADDRESS is empty")
+		return nil, fmt.Errorf("FUNDERADDRESS is empty")
 	}
 
 	if p.SDKConfig.OwnerKey == "" {
-		return fmt.Errorf("SIGNERKEY is empty")
+		return nil, fmt.Errorf("SIGNERKEY is empty")
 	}
 
 	positions, err := p.Client.SearchPositions(p.SDKConfig.FunderAddress, true, 500)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	conditionIds := make([]string, 0, len(positions.Array()))
 	negRisks := make([]bool, 0, len(positions.Array()))
 	amounts := make([][]*big.Int, 0, len(positions.Array()))
+	redeemedTokenIDs := make([]string, 0, len(positions.Array()))
+	redeemedTokenSeen := make(map[string]struct{}, len(positions.Array()))
 
 	for _, position := range positions.Array() {
 		conditionIds = append(conditionIds, position.Get("conditionId").String())
 		negRisk := position.Get("negativeRisk").Bool()
 
+		tokenID := position.Get("asset").String()
+		if tokenID == "" {
+			tokenID = position.Get("assetId").String()
+		}
+		if tokenID == "" {
+			tokenID = position.Get("asset_id").String()
+		}
+		if tokenID == "" {
+			tokenID = position.Get("tokenId").String()
+		}
+		if tokenID != "" {
+			if _, exists := redeemedTokenSeen[tokenID]; !exists {
+				redeemedTokenSeen[tokenID] = struct{}{}
+				redeemedTokenIDs = append(redeemedTokenIDs, tokenID)
+			}
+		}
+
 		if negRisk {
 			ams := []*big.Int{new(big.Int), new(big.Int)}
 			value, parseErr := utils.ParseUnits(position.Get("size").String(), constants.CollateralTokenDecimals)
 			if parseErr != nil {
-				return parseErr
+				return nil, parseErr
 			}
 			idx := int(position.Get("outcomeIndex").Int())
 			if idx < 0 || idx >= len(ams) {
-				return fmt.Errorf("invalid outcomeIndex: %d", idx)
+				return nil, fmt.Errorf("invalid outcomeIndex: %d", idx)
 			}
 			ams[idx] = value
 			amounts = append(amounts, ams)
@@ -117,22 +141,22 @@ func (p *PolymarketStateClient) redeemOnce() error {
 
 	if len(conditionIds) == 0 {
 		log.Debug().Msg("redeem skipped: no redeemable positions")
-		return nil
+		return nil, nil
 	}
 
 	builderCreds := p.SDKConfig.BuilderCreds
 	if builderCreds.Key == "" || builderCreds.Secret == "" || builderCreds.Passphrase == "" {
-		return fmt.Errorf("builder creds are empty, please set BUILDER_API_KEY/BUILDER_SECRET/BUILDER_PASSPHRASE")
+		return nil, fmt.Errorf("builder creds are empty, please set BUILDER_API_KEY/BUILDER_SECRET/BUILDER_PASSPHRASE")
 	}
 
 	relayClient := builder.NewRelayClient(p.SDKConfig.RelayerBaseURL, p.SDKConfig.OwnerKey, p.SDKConfig.ChainID, builderCreds, nil)
 	_, err = relayClient.RedeemBatch(conditionIds, negRisks, amounts, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	log.Info().Int("positions", len(conditionIds)).Msg("redeem success")
-	return nil
+	return redeemedTokenIDs, nil
 }
 
 func positionsAPILimit(limit int) int {
