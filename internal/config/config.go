@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"polypilot/internal/logx"
 	"strings"
 	"time"
 
@@ -16,9 +17,10 @@ import (
 )
 
 type Config struct {
-	ChainRPCURL string            `mapstructure:"chain_rpc_url"`
-	BalanceSync BalanceSyncConfig `mapstructure:"balance_sync"`
-	SDKConfig   sdk.Config        `mapstructure:"sdk_config"`
+	ChainRPCURL string             `mapstructure:"chain_rpc_url"`
+	BalanceSync BalanceSyncConfig  `mapstructure:"balance_sync"`
+	Logging     logx.LoggingConfig `mapstructure:"logging"`
+	SDKConfig   sdk.Config         `mapstructure:"sdk_config"`
 }
 
 type BalanceSyncConfig struct {
@@ -46,7 +48,10 @@ func Load() (Config, error) {
 	}
 
 	defaultSDKCfg := sdk.DefaultConfig()
-	cfg := Config{ChainRPCURL: "https://polygon.drpc.org"}
+	cfg := Config{
+		ChainRPCURL: "https://polygon.drpc.org",
+		Logging:     logx.DefaultConfig(),
+	}
 	if defaultSDKCfg != nil {
 		cfg.SDKConfig = *defaultSDKCfg
 	}

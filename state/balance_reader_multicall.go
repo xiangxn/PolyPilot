@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	appconfig "polypilot/internal/config"
 	utils "polypilot/internal/multicall"
@@ -80,6 +79,6 @@ func (r *MulticallBalanceReader) ReadOnchainBalance(ctx context.Context) (float6
 	if err != nil {
 		return 0, err
 	}
-	log.Printf("[MulticallBalanceReader] %s %f", r.wallet, info.Float())
+	log.Debug().Str("wallet", r.wallet.Hex()).Float64("balance", info.Float()).Msg("multicall balance read")
 	return info.Float(), nil
 }

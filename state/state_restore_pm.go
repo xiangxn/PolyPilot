@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"time"
 
@@ -48,12 +47,12 @@ func (p *PolymarketStateClient) GetPositions() (*gjson.Result, error) {
 
 func (p *PolymarketStateClient) Redeem(ctx context.Context) {
 	go func() {
-		log.Println("[PolymarketStateClient] redeem loop start")
-		defer log.Println("[PolymarketStateClient] redeem loop exit")
+		log.Info().Msg("redeem loop start")
+		defer log.Info().Msg("redeem loop exit")
 
 		run := func() {
 			if err := p.redeemOnce(); err != nil {
-				log.Printf("[PolymarketStateClient] redeem failed: %v", err)
+				log.Error().Err(err).Msg("redeem failed")
 			}
 		}
 
@@ -117,7 +116,7 @@ func (p *PolymarketStateClient) redeemOnce() error {
 	}
 
 	if len(conditionIds) == 0 {
-		log.Printf("[PolymarketStateClient] redeem skipped: no redeemable positions")
+		log.Debug().Msg("redeem skipped: no redeemable positions")
 		return nil
 	}
 
@@ -132,7 +131,7 @@ func (p *PolymarketStateClient) redeemOnce() error {
 		return err
 	}
 
-	log.Printf("[PolymarketStateClient] Redeem success, positions=%d", len(conditionIds))
+	log.Info().Int("positions", len(conditionIds)).Msg("redeem success")
 	return nil
 }
 

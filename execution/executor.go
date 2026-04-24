@@ -3,8 +3,8 @@ package execution
 import (
 	"context"
 	"fmt"
-	"log"
 	"polypilot/core"
+	"polypilot/internal/logx"
 	"polypilot/runtime"
 	"strings"
 	"sync"
@@ -16,10 +16,13 @@ import (
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
+
 const (
 	floatEpsilon          = 1e-9
 	defaultExecutionQueue = 1024
 )
+
+var log = logx.Module("executor")
 
 type trackedOrder struct {
 	MarketID      string
@@ -90,7 +93,7 @@ func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
 
 		go func() {
 			if err := e.TradeMonitor.Run(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("trade monitor stopped: %v", err)
+				log.Error().Err(err).Msg("trade monitor stopped")
 			}
 		}()
 		go e.consumeTradeEvents(ctx)
@@ -129,7 +132,7 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 			validated = append(validated, in)
 		case runtime.OrderIntentActionCancel:
 			if strings.TrimSpace(in.OrderID) == "" {
-				log.Printf("skip cancel intent: empty order id")
+				log.Warn().Msg("skip cancel intent: empty order id")
 				continue
 			}
 			validated = append(validated, in)
@@ -255,9 +258,9 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			args = append(args, orders.PostOrdersArgs{Order: po.order, OrderType: e.OrderType})
 		}
 
-		log.Printf("[Executor] 下单时间: %d", time.Now().UnixMilli())
+		startAt := time.Now().UnixMilli()
 		results, err := e.Client.PostOrders(args, e.DeferExec)
-		log.Printf("[Executor] 下单返回: %d", time.Now().UnixMilli())
+		log.Debug().Int64("submit_start_ms", startAt).Int64("submit_end_ms", time.Now().UnixMilli()).Msg("post orders batch finished")
 		if err != nil {
 			now := time.Now()
 			for _, po := range preparedOrders {
@@ -281,9 +284,9 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	}
 
 	single := preparedOrders[0]
-	log.Printf("[Executor] 下单时间: %d", time.Now().UnixMilli())
+	startAt := time.Now().UnixMilli()
 	result, err := e.Client.PostOrder(single.order, e.OrderType, e.DeferExec)
-	log.Printf("[Executor] 下单返回: %d", time.Now().UnixMilli())
+	log.Debug().Int64("submit_start_ms", startAt).Int64("submit_end_ms", time.Now().UnixMilli()).Msg("post order finished")
 	if err != nil {
 		e.publish(core.ExecutionEvent{
 			ParentOrderID: single.intent.IntentID,
@@ -472,7 +475,7 @@ func (e *Executor) consumeTradeEvents(ctx context.Context) {
 
 func (e *Executor) handleTradeEvent(ev sdk.TradeEvent) {
 	if ev.ParseErr != nil {
-		log.Printf("trade monitor parse error: %v", ev.ParseErr)
+		log.Error().Err(ev.ParseErr).Msg("trade monitor parse error")
 		return
 	}
 

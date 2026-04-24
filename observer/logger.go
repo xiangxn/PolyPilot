@@ -2,13 +2,14 @@ package observer
 
 import (
 	"context"
-	"log"
 	"polypilot/core"
-	"time"
+	"polypilot/internal/logx"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
 )
+
+var log = logx.Module("observer")
 
 type Logger struct {
 	Bus *core.EventBus
@@ -40,52 +41,58 @@ func (l *Logger) logEvent(e core.Event) {
 	switch e.Type {
 	case core.EventMarket:
 		data := e.Data.(gjson.Result)
-		log.Printf("[observer logger] event=%s question=%s endDate=%s", e.Type, data.Get("question").String(), data.Get("endDate").String())
+		log.Info().
+			Str("event", string(e.Type)).
+			Str("question", data.Get("question").String()).
+			Str("end_date", data.Get("endDate").String()).
+			Msg("observer event")
 	case core.EventExecution:
 		data := e.Data.(core.ExecutionEvent)
 		side := "BUY"
 		if data.Side == model.SELL {
 			side = "SELL"
 		}
-		log.Printf("[observer logger] event=%s order_id=%s market_id=%s token_id=%s status=%s side=%s price=%.4f req=%.2f filled=%.2f reason=%q at=%s",
-			e.Type,
-			data.OrderID,
-			data.MarketID,
-			data.TokenID,
-			data.Status,
-			side,
-			data.Price,
-			data.RequestedSize,
-			data.FilledSize,
-			data.Reason,
-			data.At.Format(time.RFC3339),
-		)
+		log.Info().
+			Str("event", string(e.Type)).
+			Str("order_id", data.OrderID).
+			Str("market_id", data.MarketID).
+			Str("token_id", data.TokenID).
+			Str("status", string(data.Status)).
+			Str("side", side).
+			Float64("price", data.Price).
+			Float64("requested_size", data.RequestedSize).
+			Float64("filled_size", data.FilledSize).
+			Str("reason", data.Reason).
+			Time("at", data.At).
+			Msg("observer event")
 	case core.EventRisk:
 		data := e.Data.(core.RiskEvent)
-		log.Printf("[observer logger] event=%s reason=%q at=%s", e.Type, data.Reason, data.At.Format(time.RFC3339))
+		log.Info().
+			Str("event", string(e.Type)).
+			Str("reason", data.Reason).
+			Time("at", data.At).
+			Msg("observer event")
 	case core.EventMetrics:
 		data := e.Data.(core.MetricsEvent)
-		log.Printf("[observer logger] event=%s input=%d ticks=%d execution=%d accepted=%d filled=%d rejected=%d buffered=%d expired=%d pending_orders=%d risk_rejected=%d orders_sent=%d bus_published=%d bus_dropped=%d subscribers=%d available=%.2f reserved=%.2f at=%s",
-			e.Type,
-			data.InputEvents,
-			data.Ticks,
-			data.ExecutionEvents,
-			data.ExecutionAccepted,
-			data.ExecutionFilled,
-			data.ExecutionRejected,
-			data.ExecutionBuffered,
-			data.ExecutionExpired,
-			data.PendingOrders,
-			data.RiskRejected,
-			data.OrdersSent,
-			data.BusPublished,
-			data.BusDropped,
-			data.BusSubscribers,
-			data.BalanceAvailable,
-			data.BalanceReserved,
-			data.At.Format(time.RFC3339),
-		)
-	default:
-		// log.Printf("[observer logger] event=%s data=%v", e.Type, e.Data)
+		log.Info().
+			Str("event", string(e.Type)).
+			Int64("input_events", int64(data.InputEvents)).
+			Int64("ticks", int64(data.Ticks)).
+			Int64("execution_events", int64(data.ExecutionEvents)).
+			Int64("execution_accepted", int64(data.ExecutionAccepted)).
+			Int64("execution_filled", int64(data.ExecutionFilled)).
+			Int64("execution_rejected", int64(data.ExecutionRejected)).
+			Int64("execution_buffered", int64(data.ExecutionBuffered)).
+			Int64("execution_expired", int64(data.ExecutionExpired)).
+			Int64("pending_orders", int64(data.PendingOrders)).
+			Int64("risk_rejected", int64(data.RiskRejected)).
+			Int64("orders_sent", int64(data.OrdersSent)).
+			Int64("bus_published", int64(data.BusPublished)).
+			Int64("bus_dropped", int64(data.BusDropped)).
+			Int64("subscribers", int64(data.BusSubscribers)).
+			Float64("balance_available", data.BalanceAvailable).
+			Float64("balance_reserved", data.BalanceReserved).
+			Time("at", data.At).
+			Msg("observer event")
 	}
 }

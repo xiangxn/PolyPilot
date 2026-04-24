@@ -2,9 +2,9 @@ package strategy
 
 import (
 	"context"
-	"log"
 	"math"
 	"polypilot/core"
+	"polypilot/internal/logx"
 	"polypilot/internal/prices"
 	"polypilot/runtime"
 	"polypilot/state"
@@ -16,6 +16,8 @@ import (
 )
 
 const PlacePrice = 0.35
+
+var log = logx.Module("strategy")
 
 type Strategy struct {
 	Bus    *core.EventBus
@@ -122,7 +124,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 									Size:     downPos.Available,
 								})
 							} else {
-								log.Printf("CalculateMarketPrice error: DOWN[%s] %v", downToken.Id, err)
+								log.Error().Err(err).Str("token_id", downToken.Id).Msg("calculate market price failed")
 							}
 						}
 					}
@@ -140,7 +142,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 									Size:     upPos.Available,
 								})
 							} else {
-								log.Printf("CalculateMarketPrice error: UP[%s] %v", upToken.Id, err)
+								log.Error().Err(err).Str("token_id", upToken.Id).Msg("calculate market price failed")
 							}
 						}
 					}

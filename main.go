@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"polypilot/execution"
 	appconfig "polypilot/internal/config"
+	"polypilot/internal/logx"
 	"polypilot/market"
 	"polypilot/observer"
 	"polypilot/probability"
@@ -31,6 +32,13 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if err := logx.Init(cfg.Logging); err != nil {
+		fmt.Fprintf(os.Stderr, "init logger failed: %v\n", err)
+		return
+	}
+	defer func() { _ = logx.Close() }()
+	logx.StartDailyRotate(ctx, nil)
 
 	balanceSyncCfg, err := state.BuildMulticallBalanceSyncConfig(cfg)
 	if err != nil {
