@@ -8,6 +8,7 @@ import (
 	"polypilot/runtime"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
+	"github.com/tidwall/gjson"
 	sdkmodel "github.com/xiangxn/go-polymarket-sdk/model"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
@@ -249,6 +250,188 @@ func TestOnTradeEvent_UnknownOrderStillPublishesFill(t *testing.T) {
 	}
 	if fill.Side != model.BUY || fill.Price != 0.41 || fill.FilledSize != 2 {
 		t.Fatalf("unexpected fill fields: %+v", fill)
+	}
+}
+
+func TestPostAcceptedThenLive_NoDuplicateAccepted(t *testing.T) {
+	bus := core.NewEventBus()
+	ch := bus.Subscribe()
+	exec := &Executor{Bus: bus}
+
+	intent := runtime.OrderIntent{
+		IntentID: "intent-1",
+		Action:   runtime.OrderIntentActionPlace,
+		MarketID: "m1",
+		TokenID:  "tk1",
+		Price:    0.44,
+		Side:     model.BUY,
+		Size:     5,
+	}
+
+	exec.trackPostedOrder("ord-post-1", intent)
+	exec.publishAcceptedFromPost(intent, "ord-post-1", time.Now())
+
+	accepted := mustRecvExecutionEvent(t, ch)
+	if accepted.Status != core.ExecutionStatusAccepted {
+		t.Fatalf("unexpected accepted status: %s", accepted.Status)
+	}
+	if accepted.OrderID != "ord-post-1" || accepted.ParentOrderID != "intent-1" {
+		t.Fatalf("unexpected accepted ids: %+v", accepted)
+	}
+
+	exec.onOrderEvent(&sdkmodel.WSOrder{
+		Id:           "ord-post-1",
+		Market:       "m1",
+		AssetId:      "tk1",
+		Side:         "BUY",
+		Price:        0.44,
+		OriginalSize: 5,
+		Status:       "LIVE",
+		Timestamp:    time.Now().Unix(),
+	})
+
+	assertNoExecutionEvent(t, ch)
+}
+
+func TestPostAcceptedThenTrade_PublishesFill(t *testing.T) {
+	bus := core.NewEventBus()
+	ch := bus.Subscribe()
+	exec := &Executor{Bus: bus}
+
+	intent := runtime.OrderIntent{
+		IntentID: "intent-2",
+		Action:   runtime.OrderIntentActionPlace,
+		MarketID: "m2",
+		TokenID:  "tk2",
+		Price:    0.35,
+		Side:     model.BUY,
+		Size:     5,
+	}
+
+	exec.trackPostedOrder("ord-post-2", intent)
+	exec.publishAcceptedFromPost(intent, "ord-post-2", time.Now())
+	_ = mustRecvExecutionEvent(t, ch)
+
+	exec.onTradeEvent(&sdkmodel.WSTrade{
+		Id:           "tr-post-2",
+		Market:       "m2",
+		AssetId:      "tk2",
+		Side:         "BUY",
+		Price:        0.35,
+		Size:         2,
+		Status:       "MINED",
+		TakerOrderId: "ord-post-2",
+		Timestamp:    time.Now().Unix(),
+	})
+
+	fill := mustRecvExecutionEvent(t, ch)
+	if fill.Status != core.ExecutionStatusPartiallyFilled {
+		t.Fatalf("unexpected fill status: %s", fill.Status)
+	}
+	if fill.OrderID != "ord-post-2" || fill.FilledSize != 2 {
+		t.Fatalf("unexpected fill fields: %+v", fill)
+	}
+	if fill.MarketID != "m2" || fill.TokenID != "tk2" {
+		t.Fatalf("unexpected market/token: %+v", fill)
+	}
+}
+
+func TestHandlePostOrdersResults_MissingResultItemPublishesRejected(t *testing.T) {
+	bus := core.NewEventBus()
+	ch := bus.Subscribe()
+	exec := &Executor{Bus: bus}
+
+	prepared := []preparedPlacement{{
+		intent: runtime.OrderIntent{
+			IntentID: "intent-miss-1",
+			Action:   runtime.OrderIntentActionPlace,
+			MarketID: "m1",
+			TokenID:  "tk1",
+			Price:    0.42,
+			Side:     model.BUY,
+			Size:     3,
+		},
+	}}
+
+	exec.handlePostOrdersResults(prepared, gjson.Parse("[]").Array())
+
+	rej := mustRecvExecutionEvent(t, ch)
+	if rej.Status != core.ExecutionStatusRejected {
+		t.Fatalf("unexpected status: %s", rej.Status)
+	}
+	if rej.ParentOrderID != "intent-miss-1" {
+		t.Fatalf("unexpected parent order id: %s", rej.ParentOrderID)
+	}
+	if rej.Reason != "post orders failed: missing result item" {
+		t.Fatalf("unexpected reason: %s", rej.Reason)
+	}
+}
+
+func TestHandlePostOrdersResults_ErrorMsgPublishesRejected(t *testing.T) {
+	bus := core.NewEventBus()
+	ch := bus.Subscribe()
+	exec := &Executor{Bus: bus}
+
+	prepared := []preparedPlacement{{
+		intent: runtime.OrderIntent{
+			IntentID: "intent-err-1",
+			Action:   runtime.OrderIntentActionPlace,
+			MarketID: "m1",
+			TokenID:  "tk1",
+			Price:    0.42,
+			Side:     model.BUY,
+			Size:     3,
+		},
+	}}
+
+	exec.handlePostOrdersResults(prepared, gjson.Parse(`[{
+		"errorMsg":"insufficient allowance",
+		"orderID":""
+	}]`).Array())
+
+	rej := mustRecvExecutionEvent(t, ch)
+	if rej.Status != core.ExecutionStatusRejected {
+		t.Fatalf("unexpected status: %s", rej.Status)
+	}
+	if rej.ParentOrderID != "intent-err-1" {
+		t.Fatalf("unexpected parent order id: %s", rej.ParentOrderID)
+	}
+	if rej.Reason != "post orders failed: insufficient allowance" {
+		t.Fatalf("unexpected reason: %s", rej.Reason)
+	}
+}
+
+func TestHandlePostOrdersResults_EmptyOrderIDPublishesRejected(t *testing.T) {
+	bus := core.NewEventBus()
+	ch := bus.Subscribe()
+	exec := &Executor{Bus: bus}
+
+	prepared := []preparedPlacement{{
+		intent: runtime.OrderIntent{
+			IntentID: "intent-empty-id-1",
+			Action:   runtime.OrderIntentActionPlace,
+			MarketID: "m1",
+			TokenID:  "tk1",
+			Price:    0.42,
+			Side:     model.BUY,
+			Size:     3,
+		},
+	}}
+
+	exec.handlePostOrdersResults(prepared, gjson.Parse(`[{
+		"errorMsg":"",
+		"orderID":""
+	}]`).Array())
+
+	rej := mustRecvExecutionEvent(t, ch)
+	if rej.Status != core.ExecutionStatusRejected {
+		t.Fatalf("unexpected status: %s", rej.Status)
+	}
+	if rej.ParentOrderID != "intent-empty-id-1" {
+		t.Fatalf("unexpected parent order id: %s", rej.ParentOrderID)
+	}
+	if rej.Reason != "post orders failed: empty order id" {
+		t.Fatalf("unexpected reason: %s", rej.Reason)
 	}
 }
 

@@ -1,0 +1,69 @@
+package runtime
+
+import (
+	"testing"
+	"time"
+
+	"polypilot/core"
+	"polypilot/state"
+
+	"github.com/polymarket/go-order-utils/pkg/model"
+)
+
+func TestHandleExecutionEventRejectedWithoutOrderIDReleasesProvisional(t *testing.T) {
+	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
+
+	now := time.Now()
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+		t.Fatalf("provisional reserve failed: %v", err)
+	}
+
+	e := &Engine{State: s}
+	e.initOrderTracking()
+	e.handleExecutionEvent(core.ExecutionEvent{
+		ParentOrderID: "i1",
+		Status:        core.ExecutionStatusRejected,
+		Reason:        "post order failed",
+	}, true)
+
+	snap := s.Snapshot()
+	if snap.Balance.Available != 100 || snap.Balance.Reserved != 0 {
+		t.Fatalf("expected provisional released on rejected without order id, got available=%v reserved=%v", snap.Balance.Available, snap.Balance.Reserved)
+	}
+}
+
+func TestHandleExecutionEventAcceptedConfirmsProvisionalWithoutDoubleReserve(t *testing.T) {
+	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
+
+	now := time.Now()
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+		t.Fatalf("provisional reserve failed: %v", err)
+	}
+
+	e := &Engine{State: s}
+	e.initOrderTracking()
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID:       "o1",
+		ParentOrderID: "i1",
+		MarketID:      "m1",
+		TokenID:       "tk1",
+		Price:         0.5,
+		Side:          model.BUY,
+		RequestedSize: 10,
+		Status:        core.ExecutionStatusAccepted,
+		At:            now,
+	}, true)
+
+	snap := s.Snapshot()
+	if snap.Balance.Available != 95 || snap.Balance.Reserved != 5 {
+		t.Fatalf("accepted confirm should not double reserve, got available=%v reserved=%v", snap.Balance.Available, snap.Balance.Reserved)
+	}
+	if _, ok := snap.Orders["o1"]; !ok {
+		t.Fatalf("expected confirmed order reservation for o1")
+	}
+	if released := s.ReleaseProvisional("i1"); released {
+		t.Fatalf("provisional should already be removed after confirm")
+	}
+}

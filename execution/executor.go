@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
+	"github.com/tidwall/gjson"
 	sdkmodel "github.com/xiangxn/go-polymarket-sdk/model"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
-
 const (
 	floatEpsilon          = 1e-9
 	defaultExecutionQueue = 1024
@@ -31,6 +31,11 @@ type trackedOrder struct {
 	Accepted      bool
 	Finalized     bool
 	SeenTradeIDs  map[string]struct{}
+}
+
+type preparedPlacement struct {
+	intent runtime.OrderIntent
+	order  *model.SignedOrder
 }
 
 type Executor struct {
@@ -214,11 +219,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 		return
 	}
 
-	type prepared struct {
-		intent runtime.OrderIntent
-		order  *model.SignedOrder
-	}
-	preparedOrders := make([]prepared, 0, len(intents))
+	preparedOrders := make([]preparedPlacement, 0, len(intents))
 	signatureType := model.POLY_GNOSIS_SAFE
 	for _, in := range intents {
 		signedOrder, err := e.Client.CreateOrder(&orders.UserOrder{
@@ -241,7 +242,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			})
 			continue
 		}
-		preparedOrders = append(preparedOrders, prepared{intent: in, order: signedOrder})
+		preparedOrders = append(preparedOrders, preparedPlacement{intent: in, order: signedOrder})
 	}
 
 	if len(preparedOrders) == 0 {
@@ -275,56 +276,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			return
 		}
 
-		resultsArray := results.Array()
-		for i, po := range preparedOrders {
-			if i >= len(resultsArray) {
-				e.publish(core.ExecutionEvent{
-					ParentOrderID: po.intent.IntentID,
-					MarketID:      po.intent.MarketID,
-					TokenID:       po.intent.TokenID,
-					Price:         po.intent.Price,
-					Side:          po.intent.Side,
-					RequestedSize: po.intent.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        "post orders failed: missing result item",
-					At:            time.Now(),
-				})
-				continue
-			}
-			result := resultsArray[i]
-			errorMsg := result.Get("errorMsg").String()
-			if errorMsg != "" {
-				e.publish(core.ExecutionEvent{
-					ParentOrderID: po.intent.IntentID,
-					MarketID:      po.intent.MarketID,
-					TokenID:       po.intent.TokenID,
-					Price:         po.intent.Price,
-					Side:          po.intent.Side,
-					RequestedSize: po.intent.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        fmt.Sprintf("post orders failed: %s", errorMsg),
-					At:            time.Now(),
-				})
-				continue
-			}
-			orderID := strings.TrimSpace(result.Get("orderID").String())
-			if orderID == "" {
-				e.publish(core.ExecutionEvent{
-					ParentOrderID: po.intent.IntentID,
-					MarketID:      po.intent.MarketID,
-					TokenID:       po.intent.TokenID,
-					Price:         po.intent.Price,
-					Side:          po.intent.Side,
-					RequestedSize: po.intent.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        "post orders failed: empty order id",
-					At:            time.Now(),
-				})
-				continue
-			}
-			e.trackPostedOrder(orderID, po.intent)
-			e.publishAcceptedFromPost(po.intent, orderID, time.Now())
-		}
+		e.handlePostOrdersResults(preparedOrders, results.Array())
 		return
 	}
 
@@ -379,6 +331,58 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	}
 	e.trackPostedOrder(orderID, single.intent)
 	e.publishAcceptedFromPost(single.intent, orderID, time.Now())
+}
+
+func (e *Executor) handlePostOrdersResults(preparedOrders []preparedPlacement, results []gjson.Result) {
+	for i, po := range preparedOrders {
+		if i >= len(results) {
+			e.publish(core.ExecutionEvent{
+				ParentOrderID: po.intent.IntentID,
+				MarketID:      po.intent.MarketID,
+				TokenID:       po.intent.TokenID,
+				Price:         po.intent.Price,
+				Side:          po.intent.Side,
+				RequestedSize: po.intent.Size,
+				Status:        core.ExecutionStatusRejected,
+				Reason:        "post orders failed: missing result item",
+				At:            time.Now(),
+			})
+			continue
+		}
+		result := results[i]
+		errorMsg := result.Get("errorMsg").String()
+		if errorMsg != "" {
+			e.publish(core.ExecutionEvent{
+				ParentOrderID: po.intent.IntentID,
+				MarketID:      po.intent.MarketID,
+				TokenID:       po.intent.TokenID,
+				Price:         po.intent.Price,
+				Side:          po.intent.Side,
+				RequestedSize: po.intent.Size,
+				Status:        core.ExecutionStatusRejected,
+				Reason:        fmt.Sprintf("post orders failed: %s", errorMsg),
+				At:            time.Now(),
+			})
+			continue
+		}
+		orderID := strings.TrimSpace(result.Get("orderID").String())
+		if orderID == "" {
+			e.publish(core.ExecutionEvent{
+				ParentOrderID: po.intent.IntentID,
+				MarketID:      po.intent.MarketID,
+				TokenID:       po.intent.TokenID,
+				Price:         po.intent.Price,
+				Side:          po.intent.Side,
+				RequestedSize: po.intent.Size,
+				Status:        core.ExecutionStatusRejected,
+				Reason:        "post orders failed: empty order id",
+				At:            time.Now(),
+			})
+			continue
+		}
+		e.trackPostedOrder(orderID, po.intent)
+		e.publishAcceptedFromPost(po.intent, orderID, time.Now())
+	}
 }
 
 func (e *Executor) trackPostedOrder(orderID string, in runtime.OrderIntent) {
