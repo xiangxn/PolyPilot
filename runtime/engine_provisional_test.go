@@ -76,6 +76,47 @@ func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *te
 	}
 }
 
+func TestHandleExecutionEventFilledReleasesRoundingResidualReserve(t *testing.T) {
+	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
+	if err := s.ReserveOrder("o1", "m1", "tk1", model.BUY, 0.35, 5); err != nil {
+		t.Fatalf("reserve order failed: %v", err)
+	}
+
+	e := &Engine{State: s}
+	e.initOrderTracking()
+	now := time.Now()
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID:       "o1",
+		MarketID:      "m1",
+		TokenID:       "tk1",
+		Price:         0.35,
+		Side:          model.BUY,
+		RequestedSize: 5,
+		Status:        core.ExecutionStatusAccepted,
+		At:            now,
+	}, true)
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID:       "o1",
+		MarketID:      "m1",
+		TokenID:       "tk1",
+		Price:         0.35,
+		Side:          model.BUY,
+		RequestedSize: 5,
+		FilledSize:    4.993074,
+		Status:        core.ExecutionStatusFilled,
+		At:            now,
+	}, true)
+
+	snap := s.Snapshot()
+	if snap.Balance.Reserved != 0 {
+		t.Fatalf("expected filled to release residual reserve, got reserved=%v", snap.Balance.Reserved)
+	}
+	if _, ok := snap.Orders["o1"]; ok {
+		t.Fatalf("expected order reservation removed after filled")
+	}
+}
+
 func TestHandleExecutionEventAcceptedConfirmsProvisionalWithoutDoubleReserve(t *testing.T) {
 	s := state.NewState(state.BalanceSyncConfig{}, nil)
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})

@@ -268,6 +268,7 @@ func (e *Engine) handleExecutionEvent(data core.ExecutionEvent, count bool) {
 			}
 		}
 		if data.Status == core.ExecutionStatusFilled {
+			e.State.ReleaseOrder(data.OrderID)
 			e.finalizeOrder(data.OrderID)
 		}
 

@@ -538,6 +538,8 @@ func (e *Executor) onOrderEvent(o *sdkmodel.WSOrder) {
 			})
 			t.Finalized = true
 		}
+	default:
+		log.Info().Any("WSOrder", *o).Msg("onOrderEvent default case")
 	}
 	e.mu.Unlock()
 
