@@ -171,6 +171,8 @@ func (s *State) ConfirmProvisional(intentID, orderID string) (bool, error) {
 	delete(s.provisionalReservations, intentID)
 
 	if _, exists := s.orderReservations[orderID]; exists {
+		s.ensureTokenPositions()
+		s.releaseReservedLocked(p.Side, p.TokenID, p.Reserved)
 		return true, nil
 	}
 

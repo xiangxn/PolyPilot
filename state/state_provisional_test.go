@@ -67,6 +67,34 @@ func TestConfirmProvisionalDoesNotDoubleReserve(t *testing.T) {
 	}
 }
 
+func TestConfirmProvisionalWhenOrderAlreadyReservedReleasesProvisional(t *testing.T) {
+	s := NewState(BalanceSyncConfig{}, nil)
+	s.Restore(Snapshot{Balance: Balance{Available: 100}})
+
+	now := time.Now()
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+		t.Fatalf("provisional reserve failed: %v", err)
+	}
+	if err := s.ReserveOrder("o1", "m1", "tk1", model.BUY, 0.5, 10); err != nil {
+		t.Fatalf("reserve order failed: %v", err)
+	}
+
+	snap := s.Snapshot()
+	if snap.Balance.Available != 90 || snap.Balance.Reserved != 10 {
+		t.Fatalf("unexpected balance before confirm: available=%v reserved=%v", snap.Balance.Available, snap.Balance.Reserved)
+	}
+
+	ok, err := s.ConfirmProvisional("i1", "o1")
+	if err != nil || !ok {
+		t.Fatalf("confirm provisional failed ok=%v err=%v", ok, err)
+	}
+
+	snap = s.Snapshot()
+	if snap.Balance.Available != 95 || snap.Balance.Reserved != 5 {
+		t.Fatalf("expected provisional reserve released after confirm, got available=%v reserved=%v", snap.Balance.Available, snap.Balance.Reserved)
+	}
+}
+
 func TestCleanupExpiredProvisionalReleasesReserve(t *testing.T) {
 	s := NewState(BalanceSyncConfig{}, nil)
 	s.Restore(Snapshot{Balance: Balance{Available: 100}})

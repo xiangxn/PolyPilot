@@ -33,6 +33,49 @@ func TestHandleExecutionEventRejectedWithoutOrderIDReleasesProvisional(t *testin
 	}
 }
 
+func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *testing.T) {
+	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
+
+	now := time.Now()
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+		t.Fatalf("provisional reserve failed: %v", err)
+	}
+
+	e := &Engine{State: s}
+	e.initOrderTracking()
+
+	// WS LIVE accepted arrives first (without ParentOrderID)
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID:       "o1",
+		MarketID:      "m1",
+		TokenID:       "tk1",
+		Price:         0.5,
+		Side:          model.BUY,
+		RequestedSize: 10,
+		Status:        core.ExecutionStatusAccepted,
+		At:            now,
+	}, true)
+
+	// post-order accepted arrives later (with ParentOrderID)
+	e.handleExecutionEvent(core.ExecutionEvent{
+		OrderID:       "o1",
+		ParentOrderID: "i1",
+		MarketID:      "m1",
+		TokenID:       "tk1",
+		Price:         0.5,
+		Side:          model.BUY,
+		RequestedSize: 10,
+		Status:        core.ExecutionStatusAccepted,
+		At:            now,
+	}, true)
+
+	snap := s.Snapshot()
+	if snap.Balance.Available != 95 || snap.Balance.Reserved != 5 {
+		t.Fatalf("accepted ws-first sequence should not leak reserve, got available=%v reserved=%v", snap.Balance.Available, snap.Balance.Reserved)
+	}
+}
+
 func TestHandleExecutionEventAcceptedConfirmsProvisionalWithoutDoubleReserve(t *testing.T) {
 	s := state.NewState(state.BalanceSyncConfig{}, nil)
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
