@@ -31,7 +31,7 @@ func DefaultConfig() LoggingConfig {
 		Filename:         "polypilot.log",
 		MaxSizeMB:        256,
 		MaxBackups:       14,
-		LocalTime:        true,
+		LocalTime:        false,
 		TimeFormat:       "20060102",
 		AsyncChannelSize: 16384,
 		DiscardOnFull:    false,
