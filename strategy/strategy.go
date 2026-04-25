@@ -29,6 +29,31 @@ func (s *Strategy) Init(bus *core.EventBus, ctx context.Context) {
 
 }
 
+func (s *Strategy) OnExecution(ev core.ExecutionEvent, snap state.Snapshot) []runtime.OrderIntent {
+	// 订单执行失败时，如果还有单边挂单就取消
+	if ev.Status == core.ExecutionStatusRejected && ev.Reason == core.ExecutionReasonTradeFailed {
+		tokenKeys := utils.GetStringArray(s.market, "clobTokenIds")
+		cancelId := ""
+		if tokenKeys[0] == ev.TokenID {
+			cancelId = tokenKeys[1]
+		} else {
+			cancelId = tokenKeys[0]
+		}
+		if cancelId != "" {
+			ins := make([]runtime.OrderIntent, 0)
+			orderIds := buildCancelIntent(cancelId, snap.Orders)
+			for _, oId := range orderIds {
+				ins = append(ins, runtime.OrderIntent{
+					Action:  runtime.OrderIntentActionCancel,
+					OrderID: oId,
+				})
+			}
+			return ins
+		}
+	}
+	return nil
+}
+
 func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state.Snapshot) []runtime.OrderIntent {
 	// log.Printf("Observation: %+v", o)
 	switch e.Type {

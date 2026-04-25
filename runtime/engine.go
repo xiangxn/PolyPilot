@@ -83,6 +83,7 @@ func (e *Engine) Start(ctx context.Context) {
 					}
 
 					e.handleExecutionEvent(data, true)
+					e.handleExecutionAwareStrategy(data)
 				}
 			}
 		}
@@ -210,6 +211,71 @@ func (e *Engine) initOrderTracking() {
 	}
 	if e.pendingByOrder == nil {
 		e.pendingByOrder = make(map[string]pendingExecution)
+	}
+}
+
+func (e *Engine) handleExecutionAwareStrategy(data core.ExecutionEvent) {
+	if e.Probability == nil {
+		e.publishRisk("probability model is nil")
+		return
+	}
+
+	if len(e.Strategies) == 0 {
+		e.publishRisk("strategy model is nil")
+		return
+	}
+
+	var snap state.Snapshot
+	hasSnap := false
+	for _, s := range e.Strategies {
+		strategy, ok := s.(ExecutionAwareStrategy)
+		if !ok {
+			continue
+		}
+		if !hasSnap {
+			snap = e.State.Snapshot()
+			hasSnap = true
+		}
+
+		intents := strategy.OnExecution(data, snap)
+		if len(intents) == 0 {
+			continue
+		}
+
+		if err := e.Risk.Check(intents, snap); err != nil {
+			e.riskRejected.Add(1)
+			e.publishRisk(err.Error())
+			return
+		}
+
+		submit := make([]OrderIntent, 0, len(intents))
+		now := time.Now()
+		for _, in := range intents {
+			action := in.Action
+			if action == "" {
+				action = OrderIntentActionPlace
+				in.Action = action
+			}
+			if action != OrderIntentActionPlace {
+				submit = append(submit, in)
+				continue
+			}
+			if in.IntentID == "" {
+				in.IntentID = e.nextIntentID()
+			}
+			if err := e.State.TryReserveProvisional(in.IntentID, in.MarketID, in.TokenID, in.Side, in.Price, in.Size, now, e.ProvisionalOrderTTL); err != nil {
+				e.riskRejected.Add(1)
+				e.publishRisk(fmt.Sprintf("provisional reserve failed intent=%s reason=%s", in.IntentID, err.Error()))
+				continue
+			}
+			submit = append(submit, in)
+		}
+		if len(submit) == 0 {
+			continue
+		}
+
+		e.ordersSent.Add(uint64(len(submit)))
+		e.Exec.Execute(submit)
 	}
 }
 

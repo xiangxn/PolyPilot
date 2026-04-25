@@ -26,3 +26,7 @@ const (
 	ExecutionStatusCancelled       ExecutionStatus = "CANCELLED"
 	ExecutionStatusRejected        ExecutionStatus = "REJECTED"
 )
+
+const (
+	ExecutionReasonTradeFailed = "TRADE_FAILED"
+)

@@ -626,7 +626,7 @@ func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
 				RequestedSize: tracked.RequestedSize,
 				FilledSize:    0,
 				Status:        core.ExecutionStatusRejected,
-				Reason:        "trade failed",
+				Reason:        core.ExecutionReasonTradeFailed,
 				At:            at,
 			})
 			tracked.Finalized = true

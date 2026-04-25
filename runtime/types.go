@@ -53,6 +53,10 @@ type Strategy interface {
 	OnUpdate(e core.Event, o Observation, stateSnap state.Snapshot) []OrderIntent
 }
 
+type ExecutionAwareStrategy interface {
+	OnExecution(ev core.ExecutionEvent, snap state.Snapshot) []OrderIntent
+}
+
 type RiskManager interface {
 	Check(orders []OrderIntent, snapshot state.Snapshot) error
 }
@@ -78,9 +82,9 @@ type Engine struct {
 	Probability Probability
 	Strategies  []Strategy
 
-	PendingEventTTL      time.Duration
-	FinalizedOrderTTL    time.Duration
-	ProvisionalOrderTTL  time.Duration
+	PendingEventTTL     time.Duration
+	FinalizedOrderTTL   time.Duration
+	ProvisionalOrderTTL time.Duration
 
 	ticks             atomic.Uint64
 	inputEvents       atomic.Uint64
@@ -118,12 +122,12 @@ type OrderIntent struct {
 	Action OrderIntentAction
 
 	// PLACE 必填
-	MarketID  string
-	TokenID   string
-	Price     float64
-	Side      model.Side
-	Size      float64
-	IntentID  string
+	MarketID string
+	TokenID  string
+	Price    float64
+	Side     model.Side
+	Size     float64
+	IntentID string
 
 	// CANCEL 必填（交易所订单 ID）
 	OrderID string
