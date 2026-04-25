@@ -76,20 +76,20 @@ func (l *Logger) logEvent(e core.Event) {
 		data := e.Data.(core.MetricsEvent)
 		log.Info().
 			Str("event", string(e.Type)).
-			Int64("input_events", int64(data.InputEvents)).
-			Int64("ticks", int64(data.Ticks)).
-			Int64("execution_events", int64(data.ExecutionEvents)).
-			Int64("execution_accepted", int64(data.ExecutionAccepted)).
-			Int64("execution_filled", int64(data.ExecutionFilled)).
-			Int64("execution_rejected", int64(data.ExecutionRejected)).
-			Int64("execution_buffered", int64(data.ExecutionBuffered)).
-			Int64("execution_expired", int64(data.ExecutionExpired)).
-			Int64("pending_orders", int64(data.PendingOrders)).
-			Int64("risk_rejected", int64(data.RiskRejected)).
-			Int64("orders_sent", int64(data.OrdersSent)).
-			Int64("bus_published", int64(data.BusPublished)).
-			Int64("bus_dropped", int64(data.BusDropped)).
-			Int64("subscribers", int64(data.BusSubscribers)).
+			Uint64("input_events", data.InputEvents).
+			Uint64("ticks", data.Ticks).
+			Uint64("execution_events", data.ExecutionEvents).
+			Uint64("execution_accepted", data.ExecutionAccepted).
+			Uint64("execution_filled", data.ExecutionFilled).
+			Uint64("execution_rejected", data.ExecutionRejected).
+			Uint64("execution_buffered", data.ExecutionBuffered).
+			Uint64("execution_expired", data.ExecutionExpired).
+			Int("pending_orders", data.PendingOrders).
+			Uint64("risk_rejected", data.RiskRejected).
+			Uint64("orders_sent", data.OrdersSent).
+			Uint64("bus_published", data.BusPublished).
+			Uint64("bus_dropped", data.BusDropped).
+			Int("subscribers", data.BusSubscribers).
 			Float64("balance_available", data.BalanceAvailable).
 			Float64("balance_reserved", data.BalanceReserved).
 			Time("at", data.At).

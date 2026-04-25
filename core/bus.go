@@ -42,7 +42,7 @@ func (b *EventBus) SubscribeWithCancel() (chan Event, func()) {
 	id := b.nextID
 	b.nextID++
 
-	ch := make(chan Event, 100)
+	ch := make(chan Event, 1024)
 	b.subs[id] = ch
 
 	var once sync.Once
