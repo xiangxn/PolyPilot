@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
+	"github.com/spf13/viper"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
@@ -49,7 +50,7 @@ type Probability interface {
 }
 
 type Strategy interface {
-	Init(bus *core.EventBus, ctx context.Context)
+	Init(bus *core.EventBus, ctx context.Context, cfg *viper.Viper)
 	OnUpdate(e core.Event, o Observation, stateSnap state.Snapshot) []OrderIntent
 }
 
@@ -72,10 +73,11 @@ type pendingExecution struct {
 }
 
 type Engine struct {
-	Bus   *core.EventBus
-	State *state.State
-	Risk  RiskManager
-	Exec  Executor
+	Bus    *core.EventBus
+	State  *state.State
+	Risk   RiskManager
+	Exec   Executor
+	Config *viper.Viper
 
 	Feeds       []Feed
 	Observers   []Observer

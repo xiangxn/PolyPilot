@@ -31,7 +31,7 @@ type BalanceSyncConfig struct {
 	CollateralToken string        `mapstructure:"collateral_token"`
 }
 
-func Load() (Config, error) {
+func Load() (Config, *viper.Viper, error) {
 	v := viper.New()
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
@@ -43,7 +43,7 @@ func Load() (Config, error) {
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
-			return Config{}, fmt.Errorf("read config.yaml failed: %w", err)
+			return Config{}, nil, fmt.Errorf("read config.yaml failed: %w", err)
 		}
 	}
 
@@ -58,17 +58,17 @@ func Load() (Config, error) {
 	if err := v.Unmarshal(&cfg, viper.DecodeHook(
 		mapstructure.StringToTimeDurationHookFunc(),
 	)); err != nil {
-		return Config{}, fmt.Errorf("decode config failed: %w", err)
+		return Config{}, nil, fmt.Errorf("decode config failed: %w", err)
 	}
 
 	if err := decryptSensitiveFields(&cfg); err != nil {
-		return Config{}, err
+		return Config{}, nil, err
 	}
 	if cfg.SDKConfig.Polymarket.OwnerKey != "" {
 		cfg.SDKConfig.Polymarket.OwnerKey = strings.TrimPrefix(strings.TrimSpace(cfg.SDKConfig.Polymarket.OwnerKey), "0x")
 	}
 
-	return cfg, nil
+	return cfg, v, nil
 }
 
 func decryptSensitiveFields(cfg *Config) error {

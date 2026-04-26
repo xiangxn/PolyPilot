@@ -24,7 +24,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	cfg, err := appconfig.Load()
+	cfg, viper, err := appconfig.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
 		return
@@ -49,8 +49,9 @@ func main() {
 	sharedClient := sdk.NewClient(&cfg.SDKConfig)
 
 	engine := &runtime.Engine{
-		State: state.NewState(balanceSyncCfg, state.NewPolymarketStateClient(sharedClient, &cfg.SDKConfig.Polymarket, 0)),
-		Risk:  &risk.Engine{},
+		Config: viper,
+		State:  state.NewState(balanceSyncCfg, state.NewPolymarketStateClient(sharedClient, &cfg.SDKConfig.Polymarket, 0)),
+		Risk:   &risk.Engine{},
 		Exec: &execution.Executor{
 			Client: sharedClient,
 			Config: &cfg.SDKConfig,

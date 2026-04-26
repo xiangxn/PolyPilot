@@ -3,15 +3,14 @@ package strategy
 import (
 	"context"
 	"math"
-	"os"
 	"polypilot/core"
 	"polypilot/internal/logx"
 	"polypilot/internal/prices"
 	"polypilot/runtime"
 	"polypilot/state"
-	"strconv"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
+	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	"github.com/xiangxn/go-polymarket-sdk/utils"
@@ -25,48 +24,39 @@ type Strategy struct {
 	Bus    *core.EventBus
 	market *gjson.Result
 
-	timeLeftSec int
-	minInPrice  float64
-	inPrice     float64
-	inSize      float64
-	minZ        float64
-	zAgo        int
+	config StrategyConfig
 }
 
-func (s *Strategy) Init(bus *core.EventBus, ctx context.Context) {
+type StrategyConfig struct {
+	TimeLeftSec int64   `mapstructure:"timeleft_sec"`
+	MinInPrice  float64 `mapstructure:"min_in_price"`
+	InPrice     float64 `mapstructure:"in_price"`
+	InSize      float64 `mapstructure:"in_size"`
+	MinZ        float64 `mapstructure:"min_z"`
+	ZAgo        int     `mapstructure:"z_ago"`
+}
+
+func DefaultStrategyConfig() StrategyConfig {
+	return StrategyConfig{
+		TimeLeftSec: 240,
+		MinInPrice:  0.4,
+		InPrice:     0.35,
+		InSize:      5,
+		MinZ:        2.3,
+		ZAgo:        5,
+	}
+}
+
+func (s *Strategy) Init(bus *core.EventBus, ctx context.Context, cfg *viper.Viper) {
 	s.Bus = bus
 
-	if tls, err := strconv.Atoi(os.Getenv("S_TIMELEFT_SEC")); err != nil {
-		s.timeLeftSec = 240
-	} else {
-		s.timeLeftSec = tls
+	sc := DefaultStrategyConfig()
+	if cfg != nil {
+		if sub := cfg.Sub("strategies.strategy"); sub != nil {
+			sub.Unmarshal(&sc)
+		}
 	}
-	if mip, err := strconv.ParseFloat(os.Getenv("S_MIN_INPRICE"), 64); err != nil {
-		s.minInPrice = 0.4
-	} else {
-		s.minInPrice = mip
-	}
-	if ip, err := strconv.ParseFloat(os.Getenv("S_INPRICE"), 64); err != nil {
-		s.inPrice = 0.35
-	} else {
-		s.inPrice = ip
-	}
-	if is, err := strconv.ParseFloat(os.Getenv("S_INSIZE"), 64); err != nil {
-		s.inSize = 5
-	} else {
-		s.inSize = is
-	}
-	if mz, err := strconv.ParseFloat(os.Getenv("S_MINZ"), 64); err != nil {
-		s.minZ = 2.3
-	} else {
-		s.minZ = mz
-	}
-	if zago, err := strconv.Atoi(os.Getenv("S_ZAGO")); err != nil {
-		s.zAgo = 5
-	} else {
-		s.zAgo = zago
-	}
-
+	s.config = sc
 }
 
 func (s *Strategy) OnExecution(ev core.ExecutionEvent, snap state.Snapshot) []runtime.OrderIntent {
@@ -106,12 +96,12 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 		s.market = nil
 
 		// 剩余时间不足时不下单
-		if o.TimeLeftSec < int64(s.timeLeftSec) {
+		if o.TimeLeftSec < s.config.TimeLeftSec {
 			return nil
 		}
 		okPrice := true
 		for _, v := range o.Tokens {
-			if v.AskPrice < s.minInPrice {
+			if v.AskPrice < s.config.MinInPrice {
 				okPrice = false
 			}
 		}
@@ -127,9 +117,9 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			ins = append(ins, runtime.OrderIntent{
 				MarketID: o.MarketID,
 				TokenID:  t.Id,
-				Price:    s.inPrice,
+				Price:    s.config.InPrice,
 				Side:     model.BUY,
-				Size:     s.inSize,
+				Size:     s.config.InSize,
 			})
 		}
 		return ins
@@ -167,9 +157,9 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			// if okDown {
 			// 	dp = downPos.Available
 			// }
-			lnt := LastNGreaterThan(zWindows, s.zAgo, s.minZ)
+			lnt := LastNGreaterThan(zWindows, s.config.ZAgo, s.config.MinZ)
 			// log.Printf("LZ: %f, LNT: %v, UPos: %f, DPos: %f, Ask: %f, PD: %f", latestZ, lnt, up, dp, upToken.AskPrice, latestPrice-openPrice)
-			if math.Abs(latestZ) > s.minZ && lnt { // 价格出现单边趋势
+			if math.Abs(latestZ) > s.config.MinZ && lnt { // 价格出现单边趋势
 				// 判断当前涨跌
 				up := false // 默认为跌
 				if latestPrice >= openPrice {

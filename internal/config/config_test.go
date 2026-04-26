@@ -178,7 +178,7 @@ func loadFromDirRaw(t *testing.T, dir string) Config {
 		_ = os.Chdir(cwd)
 	})
 
-	cfg, err := Load()
+	cfg, _, err := Load()
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}

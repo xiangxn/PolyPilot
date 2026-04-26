@@ -56,7 +56,7 @@ func (e *Engine) Start(ctx context.Context) {
 		if strategy == nil {
 			continue
 		}
-		strategy.Init(e.Bus, ctx)
+		strategy.Init(e.Bus, ctx, e.Config)
 	}
 
 	ch, cancel := e.Bus.SubscribeWithCancel()
