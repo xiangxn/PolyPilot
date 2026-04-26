@@ -3,3 +3,4 @@ data
 .env
 config.yaml
 *.config.yaml
+venv
