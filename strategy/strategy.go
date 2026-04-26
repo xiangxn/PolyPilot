@@ -3,11 +3,13 @@ package strategy
 import (
 	"context"
 	"math"
+	"os"
 	"polypilot/core"
 	"polypilot/internal/logx"
 	"polypilot/internal/prices"
 	"polypilot/runtime"
 	"polypilot/state"
+	"strconv"
 
 	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
@@ -22,10 +24,48 @@ var log = logx.Module("strategy")
 type Strategy struct {
 	Bus    *core.EventBus
 	market *gjson.Result
+
+	timeLeftSec int
+	minInPrice  float64
+	inPrice     float64
+	inSize      float64
+	minZ        float64
+	zAgo        int
 }
 
 func (s *Strategy) Init(bus *core.EventBus, ctx context.Context) {
 	s.Bus = bus
+
+	if tls, err := strconv.Atoi(os.Getenv("S_TIMELEFT_SEC")); err != nil {
+		s.timeLeftSec = 240
+	} else {
+		s.timeLeftSec = tls
+	}
+	if mip, err := strconv.ParseFloat(os.Getenv("S_MIN_INPRICE"), 64); err != nil {
+		s.minInPrice = 0.4
+	} else {
+		s.minInPrice = mip
+	}
+	if ip, err := strconv.ParseFloat(os.Getenv("S_INPRICE"), 64); err != nil {
+		s.inPrice = 0.35
+	} else {
+		s.inPrice = ip
+	}
+	if is, err := strconv.ParseFloat(os.Getenv("S_INSIZE"), 64); err != nil {
+		s.inSize = 5
+	} else {
+		s.inSize = is
+	}
+	if mz, err := strconv.ParseFloat(os.Getenv("S_MINZ"), 64); err != nil {
+		s.minZ = 2.3
+	} else {
+		s.minZ = mz
+	}
+	if zago, err := strconv.Atoi(os.Getenv("S_ZAGO")); err != nil {
+		s.zAgo = 5
+	} else {
+		s.zAgo = zago
+	}
 
 }
 
@@ -66,12 +106,12 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 		s.market = nil
 
 		// 剩余时间不足时不下单
-		if o.TimeLeftSec < 240 {
+		if o.TimeLeftSec < int64(s.timeLeftSec) {
 			return nil
 		}
 		okPrice := true
 		for _, v := range o.Tokens {
-			if v.AskPrice < 0.4 {
+			if v.AskPrice < s.minInPrice {
 				okPrice = false
 			}
 		}
@@ -87,9 +127,9 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			ins = append(ins, runtime.OrderIntent{
 				MarketID: o.MarketID,
 				TokenID:  t.Id,
-				Price:    0.35,
+				Price:    s.inPrice,
 				Side:     model.BUY,
-				Size:     5,
+				Size:     s.inSize,
 			})
 		}
 		return ins
@@ -127,9 +167,9 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			// if okDown {
 			// 	dp = downPos.Available
 			// }
-			lnt := LastNGreaterThan(zWindows, 5, 2.3)
+			lnt := LastNGreaterThan(zWindows, s.zAgo, s.minZ)
 			// log.Printf("LZ: %f, LNT: %v, UPos: %f, DPos: %f, Ask: %f, PD: %f", latestZ, lnt, up, dp, upToken.AskPrice, latestPrice-openPrice)
-			if math.Abs(latestZ) > 2.3 && lnt { // 价格出现单边趋势
+			if math.Abs(latestZ) > s.minZ && lnt { // 价格出现单边趋势
 				// 判断当前涨跌
 				up := false // 默认为跌
 				if latestPrice >= openPrice {
