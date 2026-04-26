@@ -34,6 +34,8 @@ type Engine struct {
 
 	booksMu sync.RWMutex
 	books   map[string]*atomic.Value
+
+	tokenIds []string
 }
 
 func CopyMap[K comparable, V any](src map[K]V) map[K]V {
@@ -85,10 +87,10 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			} else {
 				e.endTime = t
 			}
-			tokenIds := utils.GetStringArray(&obj, "clobTokenIds")
+			e.tokenIds = utils.GetStringArray(&obj, "clobTokenIds")
 			client := sdk.NewClient(sdk.DefaultConfig())
 			cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, "btc")
-			obs, err := client.GetOrderBooks([]sdk.BookParams{{TokenId: tokenIds[0]}, {TokenId: tokenIds[1]}})
+			obs, err := client.GetOrderBooks([]sdk.BookParams{{TokenId: e.tokenIds[0]}, {TokenId: e.tokenIds[1]}})
 			if err != nil {
 				return runtime.Observation{}, false
 			}
@@ -184,6 +186,13 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			obs.Features["openPrice"] = e.openPrice
 			obs.Features["latestPrice"] = e.latestPrice.Load()
 			obs.Features["endTime"] = e.endTime
+
+			if ob := e.GetOrderBook(e.tokenIds[0]); ob == nil {
+				obs.Features["imBalance"] = float64(0)
+			} else {
+				obs.Features["imBalance"] = indicators.CalcImBalance(ob, 3)
+			}
+
 			return obs, true
 		}
 	case core.EventSignal:
