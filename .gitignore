@@ -2,3 +2,4 @@ logs
 data
 .env
 config.yaml
+*.config.yaml
