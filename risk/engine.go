@@ -6,7 +6,7 @@ import (
 	"polypilot/runtime"
 	"polypilot/state"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 )
 
 const floatEpsilon = 1e-9
@@ -14,15 +14,15 @@ const floatEpsilon = 1e-9
 type Engine struct {
 }
 
-func (r *Engine) Check(orders []runtime.OrderIntent, s state.Snapshot) error {
-	if len(orders) == 0 {
+func (r *Engine) Check(orderIntents []runtime.OrderIntent, s state.Snapshot) error {
+	if len(orderIntents) == 0 {
 		return nil
 	}
 
 	var buyRequired float64
 	sellRequiredByToken := make(map[string]float64)
 
-	for _, o := range orders {
+	for _, o := range orderIntents {
 		action := o.Action
 		if action == "" {
 			action = runtime.OrderIntentActionPlace
@@ -54,9 +54,9 @@ func (r *Engine) Check(orders []runtime.OrderIntent, s state.Snapshot) error {
 		}
 
 		switch o.Side {
-		case model.BUY:
+		case orders.BUY:
 			buyRequired += requiredCollateral(o.Side, o.Price, o.Size)
-		case model.SELL:
+		case orders.SELL:
 			sellRequiredByToken[o.TokenID] += requiredCollateral(o.Side, o.Price, o.Size)
 		default:
 			return errors.New("invalid order side")
@@ -85,11 +85,11 @@ func (r *Engine) Check(orders []runtime.OrderIntent, s state.Snapshot) error {
 	return nil
 }
 
-func requiredCollateral(side model.Side, price, size float64) float64 {
+func requiredCollateral(side orders.Side, price, size float64) float64 {
 	switch side {
-	case model.BUY:
+	case orders.BUY:
 		return size * price
-	case model.SELL:
+	case orders.SELL:
 		return size
 	default:
 		return 0

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 )
 
 func TestTryReserveProvisionalSellPreventsOverSell(t *testing.T) {
@@ -16,7 +16,7 @@ func TestTryReserveProvisionalSellPreventsOverSell(t *testing.T) {
 	})
 
 	now := time.Now()
-	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.SELL, 0.4, 5, now, 5*time.Second); err != nil {
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", orders.SELL, 0.4, 5, now, 5*time.Second); err != nil {
 		t.Fatalf("first provisional reserve failed: %v", err)
 	}
 
@@ -28,7 +28,7 @@ func TestTryReserveProvisionalSellPreventsOverSell(t *testing.T) {
 		t.Fatalf("expected tk1 reserved=5 after first reserve, got=%v", got)
 	}
 
-	err := s.TryReserveProvisional("i2", "m1", "tk1", model.SELL, 0.4, 1, now, 5*time.Second)
+	err := s.TryReserveProvisional("i2", "m1", "tk1", orders.SELL, 0.4, 1, now, 5*time.Second)
 	if err == nil || !strings.Contains(err.Error(), "insufficient token position") {
 		t.Fatalf("expected insufficient token position error, got=%v", err)
 	}
@@ -39,7 +39,7 @@ func TestConfirmProvisionalDoesNotDoubleReserve(t *testing.T) {
 	s.Restore(Snapshot{Balance: Balance{Available: 100}})
 
 	now := time.Now()
-	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", orders.BUY, 0.5, 10, now, 5*time.Second); err != nil {
 		t.Fatalf("provisional reserve failed: %v", err)
 	}
 
@@ -72,10 +72,10 @@ func TestConfirmProvisionalWhenOrderAlreadyReservedReleasesProvisional(t *testin
 	s.Restore(Snapshot{Balance: Balance{Available: 100}})
 
 	now := time.Now()
-	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", orders.BUY, 0.5, 10, now, 5*time.Second); err != nil {
 		t.Fatalf("provisional reserve failed: %v", err)
 	}
-	if err := s.ReserveOrder("o1", "m1", "tk1", model.BUY, 0.5, 10); err != nil {
+	if err := s.ReserveOrder("o1", "m1", "tk1", orders.BUY, 0.5, 10); err != nil {
 		t.Fatalf("reserve order failed: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestCleanupExpiredProvisionalReleasesReserve(t *testing.T) {
 	s.Restore(Snapshot{Balance: Balance{Available: 100}})
 
 	now := time.Now()
-	if err := s.TryReserveProvisional("i-expire", "m1", "tk1", model.BUY, 0.4, 10, now, time.Second); err != nil {
+	if err := s.TryReserveProvisional("i-expire", "m1", "tk1", orders.BUY, 0.4, 10, now, time.Second); err != nil {
 		t.Fatalf("provisional reserve failed: %v", err)
 	}
 

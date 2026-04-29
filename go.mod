@@ -7,10 +7,9 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/joho/godotenv v1.5.1
 	github.com/phuslu/log v1.0.124
-	github.com/polymarket/go-order-utils v1.22.6
 	github.com/spf13/viper v1.20.1
 	github.com/tidwall/gjson v1.18.0
-	github.com/xiangxn/go-polymarket-sdk v0.4.0
+	github.com/xiangxn/go-polymarket-sdk v0.5.6
 	golang.org/x/term v0.36.0
 )
 

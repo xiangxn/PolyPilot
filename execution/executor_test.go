@@ -7,9 +7,9 @@ import (
 	"polypilot/core"
 	"polypilot/runtime"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
 	sdkmodel "github.com/xiangxn/go-polymarket-sdk/model"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
@@ -23,7 +23,7 @@ func TestExecute_InvalidPlacementPublishesRejectedWithoutOrderID(t *testing.T) {
 		MarketID: "m1",
 		TokenID:  "",
 		Price:    0.4,
-		Side:     model.BUY,
+		Side:     orders.BUY,
 		Size:     1,
 	}})
 
@@ -54,13 +54,13 @@ func TestExecute_QueueFullPublishesRejected(t *testing.T) {
 	ch := bus.Subscribe()
 	exec := &Executor{Bus: bus, Client: &sdk.PolymarketClient{}, queue: make(chan []runtime.OrderIntent, 1)}
 
-	exec.queue <- []runtime.OrderIntent{{Action: runtime.OrderIntentActionPlace, MarketID: "m-buffer", TokenID: "tk-buffer", Price: 0.33, Side: model.BUY, Size: 1}}
+	exec.queue <- []runtime.OrderIntent{{Action: runtime.OrderIntentActionPlace, MarketID: "m-buffer", TokenID: "tk-buffer", Price: 0.33, Side: orders.BUY, Size: 1}}
 	exec.Execute([]runtime.OrderIntent{{
 		Action:   runtime.OrderIntentActionPlace,
 		MarketID: "m1",
 		TokenID:  "tk1",
 		Price:    0.4,
-		Side:     model.BUY,
+		Side:     orders.BUY,
 		Size:     1,
 	}})
 
@@ -248,7 +248,7 @@ func TestOnTradeEvent_UnknownOrderStillPublishesFill(t *testing.T) {
 	if fill.MarketID != "m1" || fill.TokenID != "tk-unknown" {
 		t.Fatalf("unexpected market/token: %+v", fill)
 	}
-	if fill.Side != model.BUY || fill.Price != 0.41 || fill.FilledSize != 2 {
+	if fill.Side != orders.BUY || fill.Price != 0.41 || fill.FilledSize != 2 {
 		t.Fatalf("unexpected fill fields: %+v", fill)
 	}
 }
@@ -264,7 +264,7 @@ func TestPostAcceptedThenLive_NoDuplicateAccepted(t *testing.T) {
 		MarketID: "m1",
 		TokenID:  "tk1",
 		Price:    0.44,
-		Side:     model.BUY,
+		Side:     orders.BUY,
 		Size:     5,
 	}
 
@@ -304,7 +304,7 @@ func TestPostAcceptedThenTrade_PublishesFill(t *testing.T) {
 		MarketID: "m2",
 		TokenID:  "tk2",
 		Price:    0.35,
-		Side:     model.BUY,
+		Side:     orders.BUY,
 		Size:     5,
 	}
 
@@ -348,7 +348,7 @@ func TestHandlePostOrdersResults_MissingResultItemPublishesRejected(t *testing.T
 			MarketID: "m1",
 			TokenID:  "tk1",
 			Price:    0.42,
-			Side:     model.BUY,
+			Side:     orders.BUY,
 			Size:     3,
 		},
 	}}
@@ -379,7 +379,7 @@ func TestHandlePostOrdersResults_ErrorMsgPublishesRejected(t *testing.T) {
 			MarketID: "m1",
 			TokenID:  "tk1",
 			Price:    0.42,
-			Side:     model.BUY,
+			Side:     orders.BUY,
 			Size:     3,
 		},
 	}}
@@ -413,7 +413,7 @@ func TestHandlePostOrdersResults_EmptyOrderIDPublishesRejected(t *testing.T) {
 			MarketID: "m1",
 			TokenID:  "tk1",
 			Price:    0.42,
-			Side:     model.BUY,
+			Side:     orders.BUY,
 			Size:     3,
 		},
 	}}

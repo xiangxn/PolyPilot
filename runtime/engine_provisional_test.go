@@ -7,7 +7,7 @@ import (
 	"polypilot/core"
 	"polypilot/state"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 )
 
 func TestHandleExecutionEventRejectedWithoutOrderIDReleasesProvisional(t *testing.T) {
@@ -15,7 +15,7 @@ func TestHandleExecutionEventRejectedWithoutOrderIDReleasesProvisional(t *testin
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
 
 	now := time.Now()
-	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", orders.BUY, 0.5, 10, now, 5*time.Second); err != nil {
 		t.Fatalf("provisional reserve failed: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *te
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
 
 	now := time.Now()
-	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", orders.BUY, 0.5, 10, now, 5*time.Second); err != nil {
 		t.Fatalf("provisional reserve failed: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *te
 		MarketID:      "m1",
 		TokenID:       "tk1",
 		Price:         0.5,
-		Side:          model.BUY,
+		Side:          orders.BUY,
 		RequestedSize: 10,
 		Status:        core.ExecutionStatusAccepted,
 		At:            now,
@@ -64,7 +64,7 @@ func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *te
 		MarketID:      "m1",
 		TokenID:       "tk1",
 		Price:         0.5,
-		Side:          model.BUY,
+		Side:          orders.BUY,
 		RequestedSize: 10,
 		Status:        core.ExecutionStatusAccepted,
 		At:            now,
@@ -79,7 +79,7 @@ func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *te
 func TestHandleExecutionEventFilledReleasesRoundingResidualReserve(t *testing.T) {
 	s := state.NewState(state.BalanceSyncConfig{}, nil)
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
-	if err := s.ReserveOrder("o1", "m1", "tk1", model.BUY, 0.35, 5); err != nil {
+	if err := s.ReserveOrder("o1", "m1", "tk1", orders.BUY, 0.35, 5); err != nil {
 		t.Fatalf("reserve order failed: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestHandleExecutionEventFilledReleasesRoundingResidualReserve(t *testing.T)
 		MarketID:      "m1",
 		TokenID:       "tk1",
 		Price:         0.35,
-		Side:          model.BUY,
+		Side:          orders.BUY,
 		RequestedSize: 5,
 		Status:        core.ExecutionStatusAccepted,
 		At:            now,
@@ -101,7 +101,7 @@ func TestHandleExecutionEventFilledReleasesRoundingResidualReserve(t *testing.T)
 		MarketID:      "m1",
 		TokenID:       "tk1",
 		Price:         0.35,
-		Side:          model.BUY,
+		Side:          orders.BUY,
 		RequestedSize: 5,
 		FilledSize:    4.993074,
 		Status:        core.ExecutionStatusFilled,
@@ -122,7 +122,7 @@ func TestHandleExecutionEventAcceptedConfirmsProvisionalWithoutDoubleReserve(t *
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
 
 	now := time.Now()
-	if err := s.TryReserveProvisional("i1", "m1", "tk1", model.BUY, 0.5, 10, now, 5*time.Second); err != nil {
+	if err := s.TryReserveProvisional("i1", "m1", "tk1", orders.BUY, 0.5, 10, now, 5*time.Second); err != nil {
 		t.Fatalf("provisional reserve failed: %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestHandleExecutionEventAcceptedConfirmsProvisionalWithoutDoubleReserve(t *
 		MarketID:      "m1",
 		TokenID:       "tk1",
 		Price:         0.5,
-		Side:          model.BUY,
+		Side:          orders.BUY,
 		RequestedSize: 10,
 		Status:        core.ExecutionStatusAccepted,
 		At:            now,

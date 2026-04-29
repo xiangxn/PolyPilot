@@ -6,7 +6,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 )
 
@@ -67,10 +66,7 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 	orderIDs := make([]string, 0, len(openOrders))
 	seen := make(map[string]struct{}, len(openOrders))
 	for _, order := range openOrders {
-		side, ok := parseOpenOrderSide(order.Side)
-		if !ok {
-			continue
-		}
+		side := orders.Side(order.Side)
 		remainingSize := math.Max(0, order.OriginalSize-order.SizeMatched)
 		if remainingSize <= 0 {
 			continue
@@ -136,15 +132,4 @@ func mapReservationsByID(reservations []OrderReservation) map[string]OrderReserv
 		out[r.OrderID] = r
 	}
 	return out
-}
-
-func parseOpenOrderSide(side string) (model.Side, bool) {
-	switch strings.ToUpper(strings.TrimSpace(side)) {
-	case string(orders.BUY):
-		return model.BUY, true
-	case string(orders.SELL):
-		return model.SELL, true
-	default:
-		return 0, false
-	}
 }

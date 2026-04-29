@@ -11,6 +11,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 	sdkmodel "github.com/xiangxn/go-polymarket-sdk/model"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	pmutils "github.com/xiangxn/go-polymarket-sdk/utils"
 	"golang.org/x/term"
@@ -59,6 +60,14 @@ func Load() (Config, *viper.Viper, error) {
 		mapstructure.StringToTimeDurationHookFunc(),
 	)); err != nil {
 		return Config{}, nil, fmt.Errorf("decode config failed: %w", err)
+	}
+
+	if cfg.BalanceSync.CollateralToken == "" {
+		c, err := orders.GetContracts(cfg.SDKConfig.Polymarket.ChainID)
+		if err != nil {
+			return Config{}, nil, fmt.Errorf("decode config failed: %w", err)
+		}
+		cfg.BalanceSync.CollateralToken = c.Collateral.Hex()
 	}
 
 	if err := decryptSensitiveFields(&cfg); err != nil {

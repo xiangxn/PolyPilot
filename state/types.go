@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 )
@@ -29,7 +28,7 @@ type OrderReservation struct {
 	OrderID       string
 	MarketID      string
 	TokenID       string
-	Side          model.Side
+	Side          orders.Side
 	Price         float64
 	RemainingSize float64
 	Reserved      float64
@@ -39,7 +38,7 @@ type ProvisionalReservation struct {
 	IntentID      string
 	MarketID      string
 	TokenID       string
-	Side          model.Side
+	Side          orders.Side
 	Price         float64
 	RemainingSize float64
 	Reserved      float64

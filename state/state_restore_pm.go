@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
-	"github.com/xiangxn/go-polymarket-sdk/builder"
 	"github.com/xiangxn/go-polymarket-sdk/constants"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
@@ -149,11 +148,12 @@ func (p *PolymarketStateClient) redeemOnce() ([]string, error) {
 		return nil, fmt.Errorf("builder creds are empty, please set BUILDER_API_KEY/BUILDER_SECRET/BUILDER_PASSPHRASE")
 	}
 
-	relayClient := builder.NewRelayClient(p.SDKConfig.RelayerBaseURL, p.SDKConfig.OwnerKey, p.SDKConfig.ChainID, builderCreds, nil)
-	_, err = relayClient.RedeemBatch(conditionIds, negRisks, amounts, nil)
-	if err != nil {
-		return nil, err
-	}
+	// TODO: 暂时关闭redeem
+	// relayClient := builder.NewRelayClient(p.SDKConfig.RelayerBaseURL, p.SDKConfig.OwnerKey, p.SDKConfig.ChainID, builderCreds, nil, p.SDKConfig.RelayerKey)
+	// _, err = relayClient.RedeemBatch(conditionIds, negRisks, amounts)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	log.Info().Int("positions", len(conditionIds)).Msg("redeem success")
 	return redeemedTokenIDs, nil

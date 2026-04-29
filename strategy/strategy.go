@@ -9,7 +9,6 @@ import (
 	"polypilot/runtime"
 	"polypilot/state"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
@@ -118,7 +117,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 				MarketID: o.MarketID,
 				TokenID:  t.Id,
 				Price:    s.config.InPrice,
-				Side:     model.BUY,
+				Side:     orders.BUY,
 				Size:     s.config.InSize,
 			})
 		}
@@ -169,14 +168,14 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 					if !okUp && okDown { // 只有down仓,止损
 						if downPos.Available > 0 {
 							orderbook := o.GetOrderBook(downToken.Id)
-							price, err := prices.CalculateMarketPrice(*orderbook, model.SELL, downPos.Available, orders.MARKET_FAK)
+							price, err := prices.CalculateMarketPrice(*orderbook, orders.SELL, downPos.Available, orders.MARKET_FAK)
 							if err == nil {
 								// 止损单
 								ins = append(ins, runtime.OrderIntent{
 									MarketID: o.MarketID,
 									TokenID:  downToken.Id,
 									Price:    price,
-									Side:     model.SELL,
+									Side:     orders.SELL,
 									Size:     downPos.Available,
 								})
 								// 取消挂单
@@ -197,14 +196,14 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 					if okUp && !okDown { // 只有up仓，止损
 						if upPos.Available > 0 {
 							orderbook := o.GetOrderBook(upToken.Id)
-							price, err := prices.CalculateMarketPrice(*orderbook, model.SELL, upPos.Available, orders.MARKET_FAK)
+							price, err := prices.CalculateMarketPrice(*orderbook, orders.SELL, upPos.Available, orders.MARKET_FAK)
 							if err == nil {
 								// 止损单
 								ins = append(ins, runtime.OrderIntent{
 									MarketID: o.MarketID,
 									TokenID:  upToken.Id,
 									Price:    price,
-									Side:     model.SELL,
+									Side:     orders.SELL,
 									Size:     upPos.Available,
 								})
 								// 取消挂单

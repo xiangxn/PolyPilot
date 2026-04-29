@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/spf13/viper"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
@@ -127,7 +127,7 @@ type OrderIntent struct {
 	MarketID string
 	TokenID  string
 	Price    float64
-	Side     model.Side
+	Side     orders.Side
 	Size     float64
 	IntentID string
 

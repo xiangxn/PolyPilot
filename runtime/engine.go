@@ -6,8 +6,6 @@ import (
 	"polypilot/core"
 	"polypilot/state"
 	"time"
-
-	"github.com/polymarket/go-order-utils/pkg/model"
 )
 
 const (
@@ -493,17 +491,6 @@ func (e *Engine) cleanupExpiredProvisional(now time.Time) {
 func (e *Engine) nextIntentID() string {
 	seq := e.intentSeq.Add(1)
 	return fmt.Sprintf("intent-%d-%d", time.Now().UnixNano(), seq)
-}
-
-func requiredReservedForOrder(side model.Side, price, size float64) float64 {
-	switch side {
-	case model.BUY:
-		return price * size
-	case model.SELL:
-		return size
-	default:
-		return 0
-	}
 }
 
 func (e *Engine) publishRisk(reason string) {

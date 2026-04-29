@@ -10,9 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/polymarket/go-order-utils/pkg/model"
 	"github.com/tidwall/gjson"
-	sdkmodel "github.com/xiangxn/go-polymarket-sdk/model"
+	"github.com/xiangxn/go-polymarket-sdk/model"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
@@ -27,7 +26,7 @@ var log = logx.Module("executor")
 type trackedOrder struct {
 	MarketID      string
 	TokenID       string
-	Side          model.Side
+	Side          orders.Side
 	Price         float64
 	RequestedSize float64
 	FilledSize    float64
@@ -38,7 +37,7 @@ type trackedOrder struct {
 
 type preparedPlacement struct {
 	intent runtime.OrderIntent
-	order  *model.SignedOrder
+	order  *orders.SignedOrder
 }
 
 type Executor struct {
@@ -223,7 +222,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	}
 
 	preparedOrders := make([]preparedPlacement, 0, len(intents))
-	signatureType := model.POLY_GNOSIS_SAFE
+	signatureType := orders.POLY_GNOSIS_SAFE
 	for _, in := range intents {
 		signedOrder, err := e.Client.CreateOrder(&orders.UserOrder{
 			TokenID: in.TokenID,
@@ -491,16 +490,12 @@ func (e *Executor) handleTradeEvent(ev sdk.TradeEvent) {
 	}
 }
 
-func (e *Executor) onOrderEvent(o *sdkmodel.WSOrder) {
+func (e *Executor) onOrderEvent(o *model.WSOrder) {
 	if o == nil || strings.TrimSpace(o.Id) == "" || !e.isOwnOwner(o.Owner) {
 		return
 	}
 
-	side, ok := parseSide(o.Side)
-	if !ok {
-		return
-	}
-
+	side := orders.Side(o.Side)
 	at := parseEventTime(o.Timestamp)
 	status := strings.ToUpper(strings.TrimSpace(o.Status))
 
@@ -548,7 +543,7 @@ func (e *Executor) onOrderEvent(o *sdkmodel.WSOrder) {
 	}
 }
 
-func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
+func (e *Executor) onTradeEvent(ti *model.WSTrade) {
 	if ti == nil {
 		return
 	}
@@ -559,25 +554,25 @@ func (e *Executor) onTradeEvent(ti *sdkmodel.WSTrade) {
 		orderID string
 		market  string
 		tokenID string
-		side    model.Side
+		side    orders.Side
 		price   float64
 		size    float64
 	}
 
 	fills := make([]fill, 0, 1+len(ti.MakerOrders))
-	if side, ok := parseSide(ti.Side); ok && strings.TrimSpace(ti.TakerOrderId) != "" && e.isOwnOwner(ti.Owner) {
+	if strings.TrimSpace(ti.TakerOrderId) != "" && e.isOwnOwner(ti.Owner) {
 		fills = append(fills, fill{
 			orderID: ti.TakerOrderId,
 			market:  ti.Market,
 			tokenID: ti.AssetId,
-			side:    side,
+			side:    orders.Side(ti.Side),
 			price:   ti.Price,
 			size:    ti.Size,
 		})
 	}
 	for _, mo := range ti.MakerOrders {
-		side, ok := parseSide(mo.Side)
-		if !ok || strings.TrimSpace(mo.OrderId) == "" || !e.isOwnOwner(mo.Owner) {
+		side := orders.Side(mo.Side)
+		if strings.TrimSpace(mo.OrderId) == "" || !e.isOwnOwner(mo.Owner) {
 			continue
 		}
 		fills = append(fills, fill{
@@ -643,7 +638,7 @@ func (e *Executor) buildAcceptedEvent(orderID string, t *trackedOrder, at time.T
 	if t == nil || t.Accepted || t.MarketID == "" || t.TokenID == "" || t.Price <= 0 || t.RequestedSize <= 0 {
 		return core.ExecutionEvent{}, false
 	}
-	if t.Side != model.BUY && t.Side != model.SELL {
+	if t.Side != orders.BUY && t.Side != orders.SELL {
 		return core.ExecutionEvent{}, false
 	}
 	return core.ExecutionEvent{
@@ -749,21 +744,10 @@ func validatePlacement(in runtime.OrderIntent) error {
 	if in.Price <= 0 || in.Price >= 1 {
 		return fmt.Errorf("invalid order price")
 	}
-	if in.Side != model.BUY && in.Side != model.SELL {
+	if in.Side != orders.BUY && in.Side != orders.SELL {
 		return fmt.Errorf("invalid order side")
 	}
 	return nil
-}
-
-func parseSide(side string) (model.Side, bool) {
-	switch strings.ToUpper(strings.TrimSpace(side)) {
-	case "BUY":
-		return model.BUY, true
-	case "SELL":
-		return model.SELL, true
-	default:
-		return 0, false
-	}
 }
 
 func parseEventTime(ts int64) time.Time {
