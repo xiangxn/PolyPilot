@@ -79,7 +79,9 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		if ok && (e.market == nil || conditionId != e.market.Get("conditionId").String() || e.openPrice == 0) {
 			e.latestZ.Store(0)
 			e.tokens = make(map[string]runtime.Token, 2)
+			e.booksMu.Lock()
 			e.books = make(map[string]*atomic.Value)
+			e.booksMu.Unlock()
 
 			t, err := utils.ToTimestamp(obj.Get("endDate").String())
 			if err != nil {

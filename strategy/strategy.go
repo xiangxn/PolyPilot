@@ -20,8 +20,8 @@ const PlacePrice = 0.35
 var log = logx.Module("strategy")
 
 type Strategy struct {
-	Bus    *core.EventBus
-	market *gjson.Result
+	Bus     *core.EventBus
+	markets *MarketQueue
 
 	config StrategyConfig
 }
@@ -56,12 +56,17 @@ func (s *Strategy) Init(bus *core.EventBus, ctx context.Context, cfg *viper.Vipe
 		}
 	}
 	s.config = sc
+	s.markets = NewMarketQueue(3)
 }
 
 func (s *Strategy) OnExecution(ev core.ExecutionEvent, snap state.Snapshot) []runtime.OrderIntent {
 	// 订单执行失败时，如果还有单边挂单就取消
 	if ev.Status == core.ExecutionStatusRejected && ev.Reason == core.ExecutionReasonTradeFailed {
-		tokenKeys := utils.GetStringArray(s.market, "clobTokenIds")
+		market, exists := s.markets.Get(ev.MarketID)
+		if !exists {
+			return nil
+		}
+		tokenKeys := utils.GetStringArray(market, "clobTokenIds")
 		cancelId := ""
 		if tokenKeys[0] == ev.TokenID {
 			cancelId = tokenKeys[1]
@@ -92,8 +97,6 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			return nil
 		}
 
-		s.market = nil
-
 		// 剩余时间不足时不下单
 		if o.TimeLeftSec < s.config.TimeLeftSec {
 			return nil
@@ -109,7 +112,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			return nil
 		}
 
-		s.market = &obj
+		s.markets.Add(o.MarketID, &obj)
 
 		ins := make([]runtime.OrderIntent, 0, len(o.Tokens))
 		for _, t := range o.Tokens {
@@ -124,7 +127,8 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 		return ins
 
 	case core.EventOrderBook:
-		if s.market == nil {
+		market, exists := s.markets.Get(o.MarketID)
+		if !exists {
 			return nil
 		}
 		// 判断zscore等信息是否应该止损
@@ -142,7 +146,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 		// 实现止损/止盈逻辑
 		ins := make([]runtime.OrderIntent, 0)
 		if o.TimeLeftSec > 5 { // 只操作最后5秒之前
-			tokenKeys := utils.GetStringArray(s.market, "clobTokenIds")
+			tokenKeys := utils.GetStringArray(market, "clobTokenIds")
 			upToken := o.Tokens[tokenKeys[0]]
 			downToken := o.Tokens[tokenKeys[1]]
 
