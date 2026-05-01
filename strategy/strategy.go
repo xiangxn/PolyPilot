@@ -76,11 +76,24 @@ func (s *Strategy) OnExecution(ev core.ExecutionEvent, snap state.Snapshot) []ru
 		if cancelId != "" {
 			ins := make([]runtime.OrderIntent, 0)
 			orderIds := buildCancelIntent(cancelId, snap.Orders)
+			// 如果有挂单就取消
 			for _, oId := range orderIds {
 				ins = append(ins, runtime.OrderIntent{
 					Action:  runtime.OrderIntentActionCancel,
 					OrderID: oId,
 				})
+			}
+			// 如果有持仓就清仓
+			if pos, exists := snap.Position.Tokens[cancelId]; exists {
+				if pos.Available > 0 {
+					ins = append(ins, runtime.OrderIntent{
+						MarketID: ev.MarketID,
+						TokenID:  cancelId,
+						Price:    s.config.InPrice,
+						Side:     orders.SELL,
+						Size:     pos.Available,
+					})
+				}
 			}
 			return ins
 		}
