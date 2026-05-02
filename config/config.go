@@ -3,15 +3,17 @@ package config
 import (
 	"errors"
 	"fmt"
-	"github.com/xiangxn/polypilot/logx"
+	"math/big"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/xiangxn/polypilot/logx"
+
 	"github.com/go-viper/mapstructure/v2"
+	pgc "github.com/ivanzzeth/polymarket-go-contracts/v2"
 	"github.com/spf13/viper"
 	sdkmodel "github.com/xiangxn/go-polymarket-sdk/model"
-	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	pmutils "github.com/xiangxn/go-polymarket-sdk/utils"
 	"golang.org/x/term"
@@ -63,11 +65,8 @@ func Load() (Config, *viper.Viper, error) {
 	}
 
 	if cfg.BalanceSync.CollateralToken == "" {
-		c, err := orders.GetContracts(cfg.SDKConfig.Polymarket.ChainID)
-		if err != nil {
-			return Config{}, nil, fmt.Errorf("decode config failed: %w", err)
-		}
-		cfg.BalanceSync.CollateralToken = c.Collateral.Hex()
+		c := pgc.GetContractConfig(big.NewInt(cfg.SDKConfig.Polymarket.ChainID))
+		cfg.BalanceSync.CollateralToken = c.CollateralToken.Hex()
 	}
 
 	if err := decryptSensitiveFields(&cfg); err != nil {
