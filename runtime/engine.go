@@ -60,6 +60,16 @@ func (e *Engine) Start(ctx context.Context) {
 	ch, cancel := e.Bus.SubscribeWithCancel()
 	go func() {
 		defer cancel()
+
+		var strategyTickC <-chan time.Time
+		var strategyTicker *time.Ticker
+		strategyTickInterval := e.resolveStrategyTickInterval()
+		if strategyTickInterval > 0 && e.hasTickStrategy() {
+			strategyTicker = time.NewTicker(strategyTickInterval)
+			strategyTickC = strategyTicker.C
+			defer strategyTicker.Stop()
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -83,6 +93,8 @@ func (e *Engine) Start(ctx context.Context) {
 					e.handleExecutionEvent(data, true)
 					e.handleExecutionAwareStrategy(data)
 				}
+			case now := <-strategyTickC:
+				e.handleStrategyTick(now)
 			}
 		}
 	}()
@@ -130,7 +142,6 @@ func (e *Engine) handleInputUpdate(ev core.Event) {
 
 	obs, ok := e.Probability.OnUpdate(ev)
 	if !ok {
-		// e.publishRisk("invalid market event payload")
 		return
 	}
 	e.ticks.Add(1)
@@ -149,43 +160,10 @@ func (e *Engine) handleInputUpdate(ev core.Event) {
 		if len(intents) == 0 {
 			continue
 		}
-
-		if err := e.Risk.Check(intents, snap); err != nil {
-			e.riskRejected.Add(1)
-			e.publishRisk(err.Error())
+		if !e.submitIntents(intents, snap) {
 			return
 		}
-
-		submit := make([]OrderIntent, 0, len(intents))
-		now := time.Now()
-		for _, in := range intents {
-			action := in.Action
-			if action == "" {
-				action = OrderIntentActionPlace
-				in.Action = action
-			}
-			if action != OrderIntentActionPlace {
-				submit = append(submit, in)
-				continue
-			}
-			if in.IntentID == "" {
-				in.IntentID = e.nextIntentID()
-			}
-			if err := e.State.TryReserveProvisional(in.IntentID, in.MarketID, in.TokenID, in.Side, in.Price, in.Size, now, e.ProvisionalOrderTTL); err != nil {
-				e.riskRejected.Add(1)
-				e.publishRisk(fmt.Sprintf("provisional reserve failed intent=%s reason=%s", in.IntentID, err.Error()))
-				continue
-			}
-			submit = append(submit, in)
-		}
-		if len(submit) == 0 {
-			continue
-		}
-
-		e.ordersSent.Add(uint64(len(submit)))
-		e.Exec.Execute(submit)
 	}
-
 }
 
 func (e *Engine) initOrderTracking() {
@@ -239,42 +217,111 @@ func (e *Engine) handleExecutionAwareStrategy(data core.ExecutionEvent) {
 		if len(intents) == 0 {
 			continue
 		}
-
-		if err := e.Risk.Check(intents, snap); err != nil {
-			e.riskRejected.Add(1)
-			e.publishRisk(err.Error())
+		if !e.submitIntents(intents, snap) {
 			return
 		}
+	}
+}
 
-		submit := make([]OrderIntent, 0, len(intents))
-		now := time.Now()
-		for _, in := range intents {
-			action := in.Action
-			if action == "" {
-				action = OrderIntentActionPlace
-				in.Action = action
-			}
-			if action != OrderIntentActionPlace {
-				submit = append(submit, in)
-				continue
-			}
-			if in.IntentID == "" {
-				in.IntentID = e.nextIntentID()
-			}
-			if err := e.State.TryReserveProvisional(in.IntentID, in.MarketID, in.TokenID, in.Side, in.Price, in.Size, now, e.ProvisionalOrderTTL); err != nil {
-				e.riskRejected.Add(1)
-				e.publishRisk(fmt.Sprintf("provisional reserve failed intent=%s reason=%s", in.IntentID, err.Error()))
-				continue
-			}
-			submit = append(submit, in)
-		}
-		if len(submit) == 0 {
+func (e *Engine) handleStrategyTick(now time.Time) {
+	if len(e.Strategies) == 0 {
+		return
+	}
+
+	obs, ok := e.currentObservation()
+	if !ok {
+		return
+	}
+
+	snap := e.State.Snapshot()
+	for _, s := range e.Strategies {
+		tickStrategy, ok := s.(TickStrategy)
+		if !ok {
 			continue
 		}
-
-		e.ordersSent.Add(uint64(len(submit)))
-		e.Exec.Execute(submit)
+		intents := tickStrategy.OnTick(now, obs, snap)
+		if len(intents) == 0 {
+			continue
+		}
+		if !e.submitIntents(intents, snap) {
+			return
+		}
 	}
+}
+
+func (e *Engine) currentObservation() (Observation, bool) {
+	if e.Probability == nil {
+		return Observation{}, false
+	}
+	provider, ok := e.Probability.(ProbabilitySnapshotProvider)
+	if !ok {
+		return Observation{}, false
+	}
+	return provider.CurrentObservation()
+}
+
+func (e *Engine) submitIntents(intents []OrderIntent, snap state.Snapshot) bool {
+	if len(intents) == 0 {
+		return true
+	}
+
+	if err := e.Risk.Check(intents, snap); err != nil {
+		e.riskRejected.Add(1)
+		e.publishRisk(err.Error())
+		return false
+	}
+
+	submit := make([]OrderIntent, 0, len(intents))
+	now := time.Now()
+	for _, in := range intents {
+		action := in.Action
+		if action == "" {
+			action = OrderIntentActionPlace
+			in.Action = action
+		}
+		if action != OrderIntentActionPlace {
+			submit = append(submit, in)
+			continue
+		}
+		if in.IntentID == "" {
+			in.IntentID = e.nextIntentID()
+		}
+		if err := e.State.TryReserveProvisional(in.IntentID, in.MarketID, in.TokenID, in.Side, in.Price, in.Size, now, e.ProvisionalOrderTTL); err != nil {
+			e.riskRejected.Add(1)
+			e.publishRisk(fmt.Sprintf("provisional reserve failed intent=%s reason=%s", in.IntentID, err.Error()))
+			continue
+		}
+		submit = append(submit, in)
+	}
+	if len(submit) == 0 {
+		return true
+	}
+
+	e.ordersSent.Add(uint64(len(submit)))
+	e.Exec.Execute(submit)
+	return true
+}
+
+func (e *Engine) resolveStrategyTickInterval() time.Duration {
+	if e.StrategyTickInterval > 0 {
+		return e.StrategyTickInterval
+	}
+	if e.Config == nil {
+		return 0
+	}
+	return e.Config.GetDuration("runtime.strategy_tick_interval")
+}
+
+func (e *Engine) hasTickStrategy() bool {
+	for _, s := range e.Strategies {
+		if s == nil {
+			continue
+		}
+		if _, ok := s.(TickStrategy); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) handleExecutionEvent(data core.ExecutionEvent, count bool) {

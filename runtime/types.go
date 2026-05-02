@@ -49,9 +49,17 @@ type Probability interface {
 	OnUpdate(ev core.Event) (Observation, bool)
 }
 
+type ProbabilitySnapshotProvider interface {
+	CurrentObservation() (Observation, bool)
+}
+
 type Strategy interface {
 	Init(bus *core.EventBus, ctx context.Context, cfg *viper.Viper)
 	OnUpdate(e core.Event, o Observation, stateSnap state.Snapshot) []OrderIntent
+}
+
+type TickStrategy interface {
+	OnTick(now time.Time, o Observation, stateSnap state.Snapshot) []OrderIntent
 }
 
 type ExecutionAwareStrategy interface {
@@ -84,9 +92,10 @@ type Engine struct {
 	Probability Probability
 	Strategies  []Strategy
 
-	PendingEventTTL     time.Duration
-	FinalizedOrderTTL   time.Duration
-	ProvisionalOrderTTL time.Duration
+	PendingEventTTL      time.Duration
+	FinalizedOrderTTL    time.Duration
+	ProvisionalOrderTTL  time.Duration
+	StrategyTickInterval time.Duration
 
 	ticks             atomic.Uint64
 	inputEvents       atomic.Uint64
