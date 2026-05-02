@@ -2,8 +2,8 @@ package runtime
 
 import (
 	"context"
-	"polypilot/core"
-	"polypilot/state"
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/state"
 	"sync"
 	"sync/atomic"
 	"time"

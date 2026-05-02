@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"polypilot/core"
-	"polypilot/runtime"
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/runtime"
 
 	"github.com/tidwall/gjson"
 	sdkmodel "github.com/xiangxn/go-polymarket-sdk/model"

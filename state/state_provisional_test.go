@@ -9,7 +9,7 @@ import (
 )
 
 func TestTryReserveProvisionalSellPreventsOverSell(t *testing.T) {
-	s := NewState(BalanceSyncConfig{}, nil)
+	s := NewStateWithBalanceSync(BalanceSyncConfig{}, nil)
 	s.Restore(Snapshot{
 		Position: Position{Tokens: map[string]TokenPosition{"tk1": {Available: 5}}},
 		Balance:  Balance{Available: 100},
@@ -35,7 +35,7 @@ func TestTryReserveProvisionalSellPreventsOverSell(t *testing.T) {
 }
 
 func TestConfirmProvisionalDoesNotDoubleReserve(t *testing.T) {
-	s := NewState(BalanceSyncConfig{}, nil)
+	s := NewStateWithBalanceSync(BalanceSyncConfig{}, nil)
 	s.Restore(Snapshot{Balance: Balance{Available: 100}})
 
 	now := time.Now()
@@ -68,7 +68,7 @@ func TestConfirmProvisionalDoesNotDoubleReserve(t *testing.T) {
 }
 
 func TestConfirmProvisionalWhenOrderAlreadyReservedReleasesProvisional(t *testing.T) {
-	s := NewState(BalanceSyncConfig{}, nil)
+	s := NewStateWithBalanceSync(BalanceSyncConfig{}, nil)
 	s.Restore(Snapshot{Balance: Balance{Available: 100}})
 
 	now := time.Now()
@@ -96,7 +96,7 @@ func TestConfirmProvisionalWhenOrderAlreadyReservedReleasesProvisional(t *testin
 }
 
 func TestCleanupExpiredProvisionalReleasesReserve(t *testing.T) {
-	s := NewState(BalanceSyncConfig{}, nil)
+	s := NewStateWithBalanceSync(BalanceSyncConfig{}, nil)
 	s.Restore(Snapshot{Balance: Balance{Available: 100}})
 
 	now := time.Now()

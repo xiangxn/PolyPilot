@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	appconfig "github.com/xiangxn/polypilot/config"
+	utils "github.com/xiangxn/polypilot/internal/multicall"
 	"math/big"
-	appconfig "polypilot/internal/config"
-	utils "polypilot/internal/multicall"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"

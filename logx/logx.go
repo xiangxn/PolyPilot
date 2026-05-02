@@ -101,6 +101,17 @@ func Init(opt LoggingConfig) error {
 	return nil
 }
 
+func Bootstrap(ctx context.Context, opt LoggingConfig, loc *time.Location) (shutdown func() error, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err = Init(opt); err != nil {
+		return nil, err
+	}
+	StartDailyRotate(ctx, loc)
+	return Close, nil
+}
+
 func Close() error {
 	if closer != nil {
 		return closer.Close()

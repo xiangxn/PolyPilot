@@ -2,8 +2,8 @@ package observer
 
 import (
 	"context"
-	"polypilot/core"
-	"polypilot/internal/logx"
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/logx"
 
 	"github.com/tidwall/gjson"
 )

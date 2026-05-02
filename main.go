@@ -3,18 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/xiangxn/polypilot/config"
+	"github.com/xiangxn/polypilot/execution"
+	"github.com/xiangxn/polypilot/logx"
+	"github.com/xiangxn/polypilot/market"
+	"github.com/xiangxn/polypilot/observer"
+	"github.com/xiangxn/polypilot/probability"
+	"github.com/xiangxn/polypilot/risk"
+	"github.com/xiangxn/polypilot/runtime"
+	"github.com/xiangxn/polypilot/state"
+	"github.com/xiangxn/polypilot/strategy"
 	"os"
 	"os/signal"
-	"polypilot/execution"
-	appconfig "polypilot/internal/config"
-	"polypilot/internal/logx"
-	"polypilot/market"
-	"polypilot/observer"
-	"polypilot/probability"
-	"polypilot/risk"
-	"polypilot/runtime"
-	"polypilot/state"
-	"polypilot/strategy"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -24,7 +24,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	cfg, viper, err := appconfig.Load()
+	cfg, viper, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
 		return
@@ -33,24 +33,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := logx.Init(cfg.Logging); err != nil {
+	shutdown, err := logx.Bootstrap(ctx, cfg.Logging, nil)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "init logger failed: %v\n", err)
 		return
 	}
-	defer func() { _ = logx.Close() }()
-	logx.StartDailyRotate(ctx, nil)
+	defer shutdown()
 
-	balanceSyncCfg, err := state.BuildMulticallBalanceSyncConfig(cfg)
+	sharedClient := sdk.NewClient(&cfg.SDKConfig)
+
+	st, err := state.NewState(cfg, state.NewPolymarketStateClient(sharedClient, &cfg.SDKConfig.Polymarket, 0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init state failed: %v\n", err)
 		return
 	}
 
-	sharedClient := sdk.NewClient(&cfg.SDKConfig)
-
 	engine := &runtime.Engine{
 		Config: viper,
-		State:  state.NewState(balanceSyncCfg, state.NewPolymarketStateClient(sharedClient, &cfg.SDKConfig.Polymarket, 0)),
+		State:  st,
 		Risk:   &risk.Engine{},
 		Exec: &execution.Executor{
 			Client: sharedClient,

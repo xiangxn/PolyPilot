@@ -4,14 +4,14 @@ import (
 	"testing"
 	"time"
 
-	"polypilot/core"
-	"polypilot/state"
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/state"
 
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 )
 
 func TestHandleExecutionEventRejectedWithoutOrderIDReleasesProvisional(t *testing.T) {
-	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s := state.NewStateWithBalanceSync(state.BalanceSyncConfig{}, nil)
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
 
 	now := time.Now()
@@ -34,7 +34,7 @@ func TestHandleExecutionEventRejectedWithoutOrderIDReleasesProvisional(t *testin
 }
 
 func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *testing.T) {
-	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s := state.NewStateWithBalanceSync(state.BalanceSyncConfig{}, nil)
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
 
 	now := time.Now()
@@ -77,7 +77,7 @@ func TestHandleExecutionEventAcceptedWSFirstThenPostAckDoesNotLeakReserved(t *te
 }
 
 func TestHandleExecutionEventFilledReleasesRoundingResidualReserve(t *testing.T) {
-	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s := state.NewStateWithBalanceSync(state.BalanceSyncConfig{}, nil)
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
 	if err := s.ReserveOrder("o1", "m1", "tk1", orders.BUY, 0.35, 5); err != nil {
 		t.Fatalf("reserve order failed: %v", err)
@@ -118,7 +118,7 @@ func TestHandleExecutionEventFilledReleasesRoundingResidualReserve(t *testing.T)
 }
 
 func TestHandleExecutionEventAcceptedConfirmsProvisionalWithoutDoubleReserve(t *testing.T) {
-	s := state.NewState(state.BalanceSyncConfig{}, nil)
+	s := state.NewStateWithBalanceSync(state.BalanceSyncConfig{}, nil)
 	s.Restore(state.Snapshot{Balance: state.Balance{Available: 100}})
 
 	now := time.Now()

@@ -3,9 +3,9 @@ package execution
 import (
 	"context"
 	"fmt"
-	"polypilot/core"
-	"polypilot/internal/logx"
-	"polypilot/runtime"
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/logx"
+	"github.com/xiangxn/polypilot/runtime"
 	"strings"
 	"sync"
 	"time"

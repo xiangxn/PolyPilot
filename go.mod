@@ -1,4 +1,4 @@
-module polypilot
+module github.com/xiangxn/polypilot
 
 go 1.25.5
 

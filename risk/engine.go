@@ -3,8 +3,8 @@ package risk
 import (
 	"errors"
 	"fmt"
-	"polypilot/runtime"
-	"polypilot/state"
+	"github.com/xiangxn/polypilot/runtime"
+	"github.com/xiangxn/polypilot/state"
 
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 )

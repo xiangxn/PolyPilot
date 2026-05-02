@@ -2,6 +2,7 @@ package state
 
 import (
 	"errors"
+	appconfig "github.com/xiangxn/polypilot/config"
 	"maps"
 	"strings"
 	"time"
@@ -11,7 +12,15 @@ import (
 
 const floatEpsilon = 1e-9
 
-func NewState(balanceSync BalanceSyncConfig, restoreClient ExchangeStateClient) *State {
+func NewState(cfg appconfig.Config, restoreClient ExchangeStateClient) (*State, error) {
+	balanceSync, err := BuildMulticallBalanceSyncConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewStateWithBalanceSync(balanceSync, restoreClient), nil
+}
+
+func NewStateWithBalanceSync(balanceSync BalanceSyncConfig, restoreClient ExchangeStateClient) *State {
 	minBalance := balanceSync.MinBalance
 	if minBalance < 0 {
 		minBalance = 0

@@ -3,8 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"polypilot/core"
-	"polypilot/state"
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/state"
 	"time"
 )
 

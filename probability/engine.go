@@ -2,12 +2,12 @@ package probability
 
 import (
 	"context"
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/indicators"
+	"github.com/xiangxn/polypilot/internal/atomicx"
+	"github.com/xiangxn/polypilot/internal/buffer"
+	"github.com/xiangxn/polypilot/runtime"
 	"maps"
-	"polypilot/core"
-	"polypilot/indicators"
-	"polypilot/internal/atomicx"
-	"polypilot/internal/buffer"
-	"polypilot/runtime"
 	"sync"
 	"sync/atomic"
 	"time"

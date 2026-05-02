@@ -2,7 +2,7 @@ package market
 
 import (
 	"context"
-	"polypilot/core"
+	"github.com/xiangxn/polypilot/core"
 
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
