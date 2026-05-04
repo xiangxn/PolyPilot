@@ -3,17 +3,22 @@ package execution
 import (
 	"context"
 	"fmt"
-	"github.com/xiangxn/polypilot/core"
-	"github.com/xiangxn/polypilot/logx"
-	"github.com/xiangxn/polypilot/runtime"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/logx"
+	"github.com/xiangxn/polypilot/runtime"
+
 	"github.com/tidwall/gjson"
+	"github.com/xiangxn/go-polymarket-sdk/constants"
 	"github.com/xiangxn/go-polymarket-sdk/model"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
+	"github.com/xiangxn/go-polymarket-sdk/relayer"
 )
 
 const (
@@ -135,6 +140,17 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 				continue
 			}
 			validated = append(validated, in)
+		case runtime.OrderIntentActionSplit, runtime.OrderIntentActionMerge:
+			if in.Size <= 0 {
+				log.Warn().Str("Action", string(action)).Float64("Size", in.Size).Msg("skip split/merge intent: size <= 0")
+				continue
+			}
+			tlen := len(in.Tokens)
+			if tlen != 2 { // 目前只支持二元的split与merge
+				log.Warn().Int("tokens", tlen).Msg("merge tokens != 2")
+				continue
+			}
+			validated = append(validated, in)
 		default:
 			e.publish(core.ExecutionEvent{
 				ParentOrderID: in.IntentID,
@@ -154,13 +170,7 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 		return
 	}
 	if e.queue == nil {
-		if e.ExecutionQueueSize <= 0 {
-			e.ExecutionQueueSize = defaultExecutionQueue
-		}
-		e.workerOnce.Do(func() {
-			e.queue = make(chan []runtime.OrderIntent, e.ExecutionQueueSize)
-			go e.consumeExecuteQueue(context.Background())
-		})
+		return
 	}
 
 	select {
@@ -179,18 +189,185 @@ func (e *Executor) consumeExecuteQueue(ctx context.Context) {
 			if len(batch) == 0 {
 				continue
 			}
-			var placements []runtime.OrderIntent
-			var cancels []runtime.OrderIntent
+			var placements, cancels, splits, merges []runtime.OrderIntent
 			for _, in := range batch {
 				switch in.Action {
 				case runtime.OrderIntentActionCancel:
 					cancels = append(cancels, in)
+				case runtime.OrderIntentActionSplit:
+					splits = append(splits, in)
+				case runtime.OrderIntentActionMerge:
+					merges = append(merges, in)
 				default:
 					placements = append(placements, in)
 				}
 			}
 			e.submitPlacements(placements)
 			e.submitCancels(cancels)
+			e.submitSplits(splits)
+			e.submitMerges(merges)
+		}
+	}
+}
+
+func (e *Executor) submitSplits(intents []runtime.OrderIntent) {
+	if len(intents) == 0 {
+		return
+	}
+	pcfg := e.Config.Polymarket
+	relayerClient := relayer.NewRelayClient(pcfg.RelayerBaseURL, pcfg.OwnerKey, pcfg.ChainID, pcfg.BuilderCreds, nil, pcfg.RelayerKey)
+	for _, intent := range intents {
+		size := math.Trunc(intent.Size*1e6) / 1e6
+		tlen := 2
+		orderTmps := make([]string, 0, tlen)
+		newIntents := make([]runtime.OrderIntent, 0, tlen)
+		for _, t := range intent.Tokens {
+			newIntent := runtime.OrderIntent{
+				Action:   runtime.OrderIntentActionPlace,
+				MarketID: intent.MarketID,
+				TokenID:  t,
+				Price:    0.5,
+				Side:     orders.BUY,
+				Size:     size,
+			}
+			orderId := fmt.Sprintf("%d_%s", time.Now().UnixNano(), t)
+			orderTmps = append(orderTmps, orderId)
+			newIntents = append(newIntents, newIntent)
+			e.trackPostedOrder(orderId, newIntent)
+			e.publishAcceptedFromPost(newIntent, orderId, time.Now())
+		}
+		result, err := relayerClient.SplitTokens(intent.MarketID, strconv.FormatFloat(size, 'f', constants.CollateralTokenDecimals, 64))
+		if err != nil {
+			log.Error().AnErr("err", err).Msg("split token failed")
+			for i, o := range orderTmps {
+				in := newIntents[i]
+				e.publish(core.ExecutionEvent{
+					OrderID:       o,
+					MarketID:      in.MarketID,
+					TokenID:       in.TokenID,
+					Price:         in.Price,
+					Side:          in.Side,
+					RequestedSize: in.Size,
+					Status:        core.ExecutionStatusRejected,
+					Reason:        fmt.Sprintf("split token failed: %v", err),
+					At:            time.Now(),
+				})
+			}
+			continue
+		}
+		log.Info().Str("State", result.State).Str("Hash", result.Hash).Msg("submitSplits result")
+		if result.State == "STATE_NEW" {
+			for i, o := range orderTmps {
+				in := newIntents[i]
+				e.publish(core.ExecutionEvent{
+					OrderID:       o,
+					MarketID:      in.MarketID,
+					TokenID:       in.TokenID,
+					Price:         in.Price,
+					Side:          in.Side,
+					RequestedSize: in.Size,
+					FilledSize:    in.Size,
+					Status:        core.ExecutionStatusFilled,
+					At:            time.Now(),
+				})
+			}
+		} else {
+			for i, o := range orderTmps {
+				in := newIntents[i]
+				e.publish(core.ExecutionEvent{
+					OrderID:       o,
+					MarketID:      in.MarketID,
+					TokenID:       in.TokenID,
+					Price:         in.Price,
+					Side:          in.Side,
+					RequestedSize: in.Size,
+					FilledSize:    in.Size,
+					Status:        core.ExecutionStatusRejected,
+					Reason:        fmt.Sprintf("split token failed: %s", result.State),
+					At:            time.Now(),
+				})
+			}
+		}
+	}
+}
+
+func (e *Executor) submitMerges(intents []runtime.OrderIntent) {
+	if len(intents) == 0 {
+		return
+	}
+	pcfg := e.Config.Polymarket
+	relayerClient := relayer.NewRelayClient(pcfg.RelayerBaseURL, pcfg.OwnerKey, pcfg.ChainID, pcfg.BuilderCreds, nil, pcfg.RelayerKey)
+	for _, intent := range intents {
+		size := math.Trunc(intent.Size*1e6) / 1e6
+		tlen := 2
+		orderTmps := make([]string, 0, tlen)
+		newIntents := make([]runtime.OrderIntent, 0, tlen)
+		for _, t := range intent.Tokens {
+			newIntent := runtime.OrderIntent{
+				Action:   runtime.OrderIntentActionPlace,
+				MarketID: intent.MarketID,
+				TokenID:  t,
+				Price:    0.5,
+				Side:     orders.SELL,
+				Size:     size,
+			}
+			orderId := fmt.Sprintf("%d_%s", time.Now().UnixNano(), t)
+			orderTmps = append(orderTmps, orderId)
+			newIntents = append(newIntents, newIntent)
+			e.trackPostedOrder(orderId, newIntent)
+			e.publishAcceptedFromPost(newIntent, orderId, time.Now())
+		}
+		result, err := relayerClient.MergeTokens(intent.MarketID, strconv.FormatFloat(size, 'f', constants.CollateralTokenDecimals, 64))
+		if err != nil {
+			log.Error().AnErr("err", err).Msg("merge token failed")
+			for i, o := range orderTmps {
+				in := newIntents[i]
+				e.publish(core.ExecutionEvent{
+					OrderID:       o,
+					MarketID:      in.MarketID,
+					TokenID:       in.TokenID,
+					Price:         in.Price,
+					Side:          in.Side,
+					RequestedSize: in.Size,
+					Status:        core.ExecutionStatusRejected,
+					Reason:        fmt.Sprintf("merge token failed: %v", err),
+					At:            time.Now(),
+				})
+			}
+			continue
+		}
+		log.Info().Str("State", result.State).Str("Hash", result.Hash).Msg("submitMerges result")
+		if result.State == "STATE_NEW" {
+			for i, o := range orderTmps {
+				in := newIntents[i]
+				e.publish(core.ExecutionEvent{
+					OrderID:       o,
+					MarketID:      in.MarketID,
+					TokenID:       in.TokenID,
+					Price:         in.Price,
+					Side:          in.Side,
+					RequestedSize: in.Size,
+					FilledSize:    in.Size,
+					Status:        core.ExecutionStatusFilled,
+					At:            time.Now(),
+				})
+			}
+		} else {
+			for i, o := range orderTmps {
+				in := newIntents[i]
+				e.publish(core.ExecutionEvent{
+					OrderID:       o,
+					MarketID:      in.MarketID,
+					TokenID:       in.TokenID,
+					Price:         in.Price,
+					Side:          in.Side,
+					RequestedSize: in.Size,
+					FilledSize:    in.Size,
+					Status:        core.ExecutionStatusRejected,
+					Reason:        fmt.Sprintf("merge token failed: %s", result.State),
+					At:            time.Now(),
+				})
+			}
 		}
 	}
 }

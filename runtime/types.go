@@ -2,11 +2,12 @@ package runtime
 
 import (
 	"context"
-	"github.com/xiangxn/polypilot/core"
-	"github.com/xiangxn/polypilot/state"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/xiangxn/polypilot/core"
+	"github.com/xiangxn/polypilot/state"
 
 	"github.com/spf13/viper"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
@@ -127,6 +128,8 @@ type OrderIntentAction string
 const (
 	OrderIntentActionPlace  OrderIntentAction = "PLACE"
 	OrderIntentActionCancel OrderIntentAction = "CANCEL"
+	OrderIntentActionSplit  OrderIntentAction = "SPLIT"
+	OrderIntentActionMerge  OrderIntentAction = "MERGE"
 )
 
 type OrderIntent struct {
@@ -137,9 +140,14 @@ type OrderIntent struct {
 	TokenID  string
 	Price    float64
 	Side     orders.Side
+
+	// SPLIT,MERGE时为amount
 	Size     float64
 	IntentID string
 
 	// CANCEL 必填（交易所订单 ID）
 	OrderID string
+
+	// SPLIT,MERGE时需要所有tokenIds
+	Tokens []string
 }
