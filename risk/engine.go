@@ -3,6 +3,7 @@ package risk
 import (
 	"errors"
 	"fmt"
+
 	"github.com/xiangxn/polypilot/runtime"
 	"github.com/xiangxn/polypilot/state"
 
@@ -34,7 +35,7 @@ func (r *Engine) Check(orderIntents []runtime.OrderIntent, s state.Snapshot) err
 				return errors.New("invalid cancel order id")
 			}
 			continue
-		case runtime.OrderIntentActionPlace:
+		case runtime.OrderIntentActionPlace, runtime.OrderIntentActionSplit, runtime.OrderIntentActionMerge:
 			// continue below
 		default:
 			return errors.New("invalid order action")
@@ -49,18 +50,30 @@ func (r *Engine) Check(orderIntents []runtime.OrderIntent, s state.Snapshot) err
 		if o.Size <= 0 {
 			return errors.New("invalid order size")
 		}
-		if o.Price <= 0 || o.Price >= 1 {
-			return errors.New("invalid order price")
+
+		if action == runtime.OrderIntentActionPlace {
+			if o.Price <= 0 || o.Price >= 1 {
+				return errors.New("invalid order price")
+			}
+			switch o.Side {
+			case orders.BUY:
+				buyRequired += requiredCollateral(o.Side, o.Price, o.Size)
+			case orders.SELL:
+				sellRequiredByToken[o.TokenID] += requiredCollateral(o.Side, o.Price, o.Size)
+			default:
+				return errors.New("invalid order side")
+			}
+		} else {
+			switch action {
+			case runtime.OrderIntentActionSplit:
+				buyRequired += o.Size
+			case runtime.OrderIntentActionMerge:
+				for _, t := range o.Tokens {
+					sellRequiredByToken[t] += o.Size
+				}
+			}
 		}
 
-		switch o.Side {
-		case orders.BUY:
-			buyRequired += requiredCollateral(o.Side, o.Price, o.Size)
-		case orders.SELL:
-			sellRequiredByToken[o.TokenID] += requiredCollateral(o.Side, o.Price, o.Size)
-		default:
-			return errors.New("invalid order side")
-		}
 	}
 
 	if buyRequired > 0 {
