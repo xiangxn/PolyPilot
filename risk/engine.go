@@ -44,14 +44,15 @@ func (r *Engine) Check(orderIntents []runtime.OrderIntent, s state.Snapshot) err
 		if o.MarketID == "" {
 			return errors.New("invalid market id")
 		}
-		if o.TokenID == "" {
-			return errors.New("invalid token id")
-		}
+
 		if o.Size <= 0 {
 			return errors.New("invalid order size")
 		}
 
 		if action == runtime.OrderIntentActionPlace {
+			if o.TokenID == "" {
+				return errors.New("invalid token id")
+			}
 			if o.Price <= 0 || o.Price >= 1 {
 				return errors.New("invalid order price")
 			}
@@ -64,6 +65,9 @@ func (r *Engine) Check(orderIntents []runtime.OrderIntent, s state.Snapshot) err
 				return errors.New("invalid order side")
 			}
 		} else {
+			if len(o.Tokens) != 2 {
+				return errors.New("Invalid token count")
+			}
 			switch action {
 			case runtime.OrderIntentActionSplit:
 				buyRequired += o.Size
