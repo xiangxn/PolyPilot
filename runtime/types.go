@@ -59,6 +59,10 @@ type Strategy interface {
 	OnUpdate(e core.Event, o Observation, stateSnap state.Snapshot) []OrderIntent
 }
 
+/*
+使用时注意：需要在策略中缓存state自己来处理下单去重的问题。
+这是独立于数据事件的一个ticker驱动
+*/
 type TickStrategy interface {
 	OnTick(now time.Time, o Observation, stateSnap state.Snapshot) []OrderIntent
 }
