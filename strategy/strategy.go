@@ -2,12 +2,13 @@ package strategy
 
 import (
 	"context"
+	"math"
+
 	"github.com/xiangxn/polypilot/core"
 	"github.com/xiangxn/polypilot/internal/prices"
 	"github.com/xiangxn/polypilot/logx"
 	"github.com/xiangxn/polypilot/runtime"
 	"github.com/xiangxn/polypilot/state"
-	"math"
 
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
@@ -59,7 +60,7 @@ func (s *Strategy) Init(bus *core.EventBus, ctx context.Context, cfg *viper.Vipe
 	s.markets = NewMarketQueue(3)
 }
 
-func (s *Strategy) OnExecution(ev core.ExecutionEvent, snap state.Snapshot) []runtime.OrderIntent {
+func (s *Strategy) OnExecution(ev core.ExecutionEvent, o runtime.Observation, snap state.Snapshot) []runtime.OrderIntent {
 	// 订单执行失败时，如果还有单边挂单就取消
 	if ev.Status == core.ExecutionStatusRejected && ev.Reason == core.ExecutionReasonTradeFailed {
 		market, exists := s.markets.Get(ev.MarketID)

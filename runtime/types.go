@@ -64,7 +64,7 @@ type TickStrategy interface {
 }
 
 type ExecutionAwareStrategy interface {
-	OnExecution(ev core.ExecutionEvent, snap state.Snapshot) []OrderIntent
+	OnExecution(ev core.ExecutionEvent, o Observation, snap state.Snapshot) []OrderIntent
 }
 
 type RiskManager interface {

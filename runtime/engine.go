@@ -3,9 +3,10 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/xiangxn/polypilot/core"
 	"github.com/xiangxn/polypilot/state"
-	"time"
 )
 
 const (
@@ -201,6 +202,11 @@ func (e *Engine) handleExecutionAwareStrategy(data core.ExecutionEvent) {
 		return
 	}
 
+	obs, ok := e.currentObservation()
+	if !ok {
+		return
+	}
+
 	var snap state.Snapshot
 	hasSnap := false
 	for _, s := range e.Strategies {
@@ -213,7 +219,7 @@ func (e *Engine) handleExecutionAwareStrategy(data core.ExecutionEvent) {
 			hasSnap = true
 		}
 
-		intents := strategy.OnExecution(data, snap)
+		intents := strategy.OnExecution(data, obs, snap)
 		if len(intents) == 0 {
 			continue
 		}
