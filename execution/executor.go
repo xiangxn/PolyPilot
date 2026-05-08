@@ -695,7 +695,7 @@ func (e *Executor) onOrderEvent(o *model.WSOrder) {
 			out = append(out, ev)
 			t.Accepted = true
 		}
-	case "CANCELED":
+	case "CANCELED", "CANCELED_MARKET_RESOLVED":
 		if !t.Finalized {
 			out = append(out, core.ExecutionEvent{
 				OrderID:       o.Id,
