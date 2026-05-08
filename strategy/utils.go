@@ -58,3 +58,22 @@ func LastNGreaterThan(arr []float64, n int, threshold float64) bool {
 	}
 	return true
 }
+
+func GetBestPrice(book []orders.Book) float64 {
+	var bidPrice float64
+	bLen := len(book)
+	if bLen > 0 {
+		bidPrice = book[bLen-1].Price
+	}
+	return bidPrice
+}
+
+func GetOrderRemainingSize(tokenId string, side orders.Side, os map[string]state.OrderReservation) float64 {
+	var rs float64
+	for _, o := range os {
+		if o.Side == side && o.RemainingSize > 0 && o.TokenID == tokenId {
+			rs += o.RemainingSize
+		}
+	}
+	return rs
+}
