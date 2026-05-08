@@ -5,7 +5,6 @@ import (
 	"math"
 
 	"github.com/xiangxn/polypilot/core"
-	"github.com/xiangxn/polypilot/internal/prices"
 	"github.com/xiangxn/polypilot/logx"
 	"github.com/xiangxn/polypilot/runtime"
 	"github.com/xiangxn/polypilot/state"
@@ -76,7 +75,7 @@ func (s *Strategy) OnExecution(ev core.ExecutionEvent, o runtime.Observation, sn
 		}
 		if cancelId != "" {
 			ins := make([]runtime.OrderIntent, 0)
-			orderIds := buildCancelIntent(cancelId, snap.Orders)
+			orderIds := BuildCancelIntent(cancelId, snap.Orders)
 			// 如果有挂单就取消
 			for _, oId := range orderIds {
 				ins = append(ins, runtime.OrderIntent{
@@ -186,7 +185,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 					if !okUp && okDown { // 只有down仓,止损
 						if downPos.Available > 0 {
 							orderbook := o.GetOrderBook(downToken.Id)
-							price, err := prices.CalculateMarketPrice(*orderbook, orders.SELL, downPos.Available, orders.MARKET_FAK)
+							price, err := CalculateMarketPrice(*orderbook, orders.SELL, downPos.Available, orders.MARKET_FAK)
 							if err == nil {
 								// 止损单
 								ins = append(ins, runtime.OrderIntent{
@@ -197,7 +196,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 									Size:     downPos.Available,
 								})
 								// 取消挂单
-								orderIds := buildCancelIntent(upToken.Id, stateSnap.Orders)
+								orderIds := BuildCancelIntent(upToken.Id, stateSnap.Orders)
 								for _, oId := range orderIds {
 									ins = append(ins, runtime.OrderIntent{
 										Action:  runtime.OrderIntentActionCancel,
@@ -214,7 +213,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 					if okUp && !okDown { // 只有up仓，止损
 						if upPos.Available > 0 {
 							orderbook := o.GetOrderBook(upToken.Id)
-							price, err := prices.CalculateMarketPrice(*orderbook, orders.SELL, upPos.Available, orders.MARKET_FAK)
+							price, err := CalculateMarketPrice(*orderbook, orders.SELL, upPos.Available, orders.MARKET_FAK)
 							if err == nil {
 								// 止损单
 								ins = append(ins, runtime.OrderIntent{
@@ -225,7 +224,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 									Size:     upPos.Available,
 								})
 								// 取消挂单
-								orderIds := buildCancelIntent(downToken.Id, stateSnap.Orders)
+								orderIds := BuildCancelIntent(downToken.Id, stateSnap.Orders)
 								for _, oId := range orderIds {
 									ins = append(ins, runtime.OrderIntent{
 										Action:  runtime.OrderIntentActionCancel,
@@ -246,40 +245,4 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 
 	return nil
 
-}
-
-func buildCancelIntent(tokenId string, orders map[string]state.OrderReservation) []string {
-	orderIds := []string{}
-	for _, o := range orders {
-		if o.TokenID == tokenId {
-			orderIds = append(orderIds, o.OrderID)
-		}
-	}
-	return orderIds
-}
-
-func TopNGreaterThan(arr []float64, n int, threshold float64) bool {
-	if len(arr) < n {
-		return false
-	}
-	for i := range n {
-		if arr[i] <= threshold {
-			return false
-		}
-	}
-	return true
-}
-
-func LastNGreaterThan(arr []float64, n int, threshold float64) bool {
-	if len(arr) < n {
-		return false
-	}
-
-	start := len(arr) - n
-	for _, v := range arr[start:] {
-		if math.Abs(v) <= threshold {
-			return false
-		}
-	}
-	return true
 }
