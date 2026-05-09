@@ -143,13 +143,8 @@ func (p *PolymarketStateClient) redeemOnce() ([]string, error) {
 		return nil, nil
 	}
 
-	builderCreds := p.SDKConfig.BuilderCreds
-	if builderCreds.Key == "" || builderCreds.Secret == "" || builderCreds.Passphrase == "" {
-		return nil, fmt.Errorf("builder creds are empty, please set BUILDER_API_KEY/BUILDER_SECRET/BUILDER_PASSPHRASE")
-	}
-
 	// TODO: 暂时关闭redeem
-	// relayClient := builder.NewRelayClient(p.SDKConfig.RelayerBaseURL, p.SDKConfig.OwnerKey, p.SDKConfig.ChainID, builderCreds, nil, p.SDKConfig.RelayerKey)
+	// relayClient := builder.NewRelayClient(p.SDKConfig.RelayerBaseURL, p.SDKConfig.OwnerKey, p.SDKConfig.ChainID, p.SDKConfig.BuilderCreds, nil, p.SDKConfig.RelayerKey)
 	// _, err = relayClient.RedeemBatch(conditionIds, negRisks, amounts)
 	// if err != nil {
 	// 	return nil, err
