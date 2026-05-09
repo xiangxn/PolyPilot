@@ -307,6 +307,8 @@ github.com/xiangxn/go-polymarket-sdk v0.6.3 h1:UU5qJQAzNxgDH3dbfQtHfrgwR+wBHLmpJ
 github.com/xiangxn/go-polymarket-sdk v0.6.3/go.mod h1:vwtCWdgwGNs984geZRrGpp3/DgNE+s6+0F6M+Qtoqf4=
 github.com/xiangxn/go-polymarket-sdk v0.6.4 h1:Tbdxlw6oOfd6vWBl55YUz4O22A73gv5TB1DbBy12RD4=
 github.com/xiangxn/go-polymarket-sdk v0.6.4/go.mod h1:vwtCWdgwGNs984geZRrGpp3/DgNE+s6+0F6M+Qtoqf4=
+github.com/xiangxn/go-polymarket-sdk v0.6.5 h1:TFMMEoqugk+MgDS2kiW653Gyge622ahLbRiXfzmmmqo=
+github.com/xiangxn/go-polymarket-sdk v0.6.5/go.mod h1:vwtCWdgwGNs984geZRrGpp3/DgNE+s6+0F6M+Qtoqf4=
 github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 h1:gEOO8jv9F4OT7lGCjxCBTO/36wtF6j2nSip77qHd4x4=
 github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1/go.mod h1:Ohn+xnUBiLI6FVj/9LpzZWtj1/D6lUovWYBkxHVV3aM=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
