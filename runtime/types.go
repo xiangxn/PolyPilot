@@ -101,6 +101,8 @@ type Engine struct {
 	FinalizedOrderTTL    time.Duration
 	ProvisionalOrderTTL  time.Duration
 	StrategyTickInterval time.Duration
+	// 指标打印间隔,默认5m
+	MetricsInterval time.Duration
 
 	ticks             atomic.Uint64
 	inputEvents       atomic.Uint64

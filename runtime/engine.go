@@ -13,13 +13,33 @@ const (
 	defaultPendingEventTTL     = 30 * time.Second
 	defaultFinalizedOrderTTL   = 10 * time.Minute
 	defaultProvisionalOrderTTL = 5 * time.Second
+
+	defaultMetricsInterval = 5 * time.Minute
 )
+
+func (e *Engine) initConfig() {
+
+	if e.Config == nil {
+		e.StrategyTickInterval = 0
+		e.MetricsInterval = defaultMetricsInterval
+	} else {
+		e.StrategyTickInterval = e.Config.GetDuration("runtime.strategy_tick_interval")
+		mi := e.Config.GetDuration("runtime.metrics_interval")
+		if mi == 0 {
+			e.MetricsInterval = defaultMetricsInterval
+		} else {
+			e.MetricsInterval = mi
+		}
+	}
+}
 
 func (e *Engine) Start(ctx context.Context) {
 	if e.State == nil || e.Risk == nil || e.Exec == nil {
 		return
 	}
 	e.Bus = core.NewEventBus()
+
+	e.initConfig()
 
 	e.initOrderTracking()
 	// 同步平台数据
@@ -64,9 +84,8 @@ func (e *Engine) Start(ctx context.Context) {
 
 		var strategyTickC <-chan time.Time
 		var strategyTicker *time.Ticker
-		strategyTickInterval := e.resolveStrategyTickInterval()
-		if strategyTickInterval > 0 && e.hasTickStrategy() {
-			strategyTicker = time.NewTicker(strategyTickInterval)
+		if e.StrategyTickInterval > 0 && e.hasTickStrategy() {
+			strategyTicker = time.NewTicker(e.StrategyTickInterval)
 			strategyTickC = strategyTicker.C
 			defer strategyTicker.Stop()
 		}
@@ -108,7 +127,7 @@ func (e *Engine) Start(ctx context.Context) {
 	}
 
 	cleanupTicker := time.NewTicker(5 * time.Second)
-	metricsTicker := time.NewTicker(1 * time.Minute)
+	metricsTicker := time.NewTicker(e.MetricsInterval)
 	defer cleanupTicker.Stop()
 	defer metricsTicker.Stop()
 
@@ -306,16 +325,6 @@ func (e *Engine) submitIntents(intents []OrderIntent, snap state.Snapshot) bool 
 	e.ordersSent.Add(uint64(len(submit)))
 	e.Exec.Execute(submit)
 	return true
-}
-
-func (e *Engine) resolveStrategyTickInterval() time.Duration {
-	if e.StrategyTickInterval > 0 {
-		return e.StrategyTickInterval
-	}
-	if e.Config == nil {
-		return 0
-	}
-	return e.Config.GetDuration("runtime.strategy_tick_interval")
 }
 
 func (e *Engine) hasTickStrategy() bool {
