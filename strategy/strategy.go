@@ -140,7 +140,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 		return ins
 
 	case core.EventOrderBook:
-		market, exists := s.markets.Get(o.MarketID)
+		_, exists := s.markets.Get(o.MarketID)
 		if !exists {
 			return nil
 		}
@@ -159,7 +159,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 		// 实现止损/止盈逻辑
 		ins := make([]runtime.OrderIntent, 0)
 		if o.TimeLeftSec > 5 { // 只操作最后5秒之前
-			tokenKeys := utils.GetStringArray(market, "clobTokenIds")
+			tokenKeys := o.TokenIds
 			upToken := o.Tokens[tokenKeys[0]]
 			downToken := o.Tokens[tokenKeys[1]]
 
@@ -185,6 +185,9 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 					if !okUp && okDown { // 只有down仓,止损
 						if downPos.Available > 0 {
 							orderbook := o.GetOrderBook(downToken.Id)
+							if orderbook == nil {
+								return nil
+							}
 							price, err := CalculateMarketPrice(*orderbook, orders.SELL, downPos.Available, orders.MARKET_FAK)
 							if err == nil {
 								// 止损单
@@ -213,6 +216,9 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 					if okUp && !okDown { // 只有up仓，止损
 						if upPos.Available > 0 {
 							orderbook := o.GetOrderBook(upToken.Id)
+							if orderbook == nil {
+								return nil
+							}
 							price, err := CalculateMarketPrice(*orderbook, orders.SELL, upPos.Available, orders.MARKET_FAK)
 							if err == nil {
 								// 止损单
