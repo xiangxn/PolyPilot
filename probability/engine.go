@@ -2,15 +2,16 @@ package probability
 
 import (
 	"context"
+	"maps"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/xiangxn/polypilot/core"
 	"github.com/xiangxn/polypilot/indicators"
 	"github.com/xiangxn/polypilot/internal/atomicx"
 	"github.com/xiangxn/polypilot/internal/buffer"
 	"github.com/xiangxn/polypilot/runtime"
-	"maps"
-	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
@@ -187,9 +188,12 @@ func (e *Engine) fillFeatures(obs *runtime.Observation) {
 	if e.signal.zWindows != nil {
 		obs.Features["zWindows"] = e.signal.zWindows.Last(10)
 	}
-	obs.Features["openPrice"] = e.market.openPrice
-	obs.Features["latestPrice"] = e.signal.latestPrice.Load()
+	openPrice := e.market.openPrice
+	latestPrice := e.signal.latestPrice.Load()
+	obs.Features["openPrice"] = openPrice
+	obs.Features["latestPrice"] = latestPrice
 	obs.Features["endTime"] = e.market.endTime
+	obs.Features["diffPrice"] = latestPrice - openPrice
 
 	if len(e.market.tokenIDs) > 0 {
 		if ob := e.GetOrderBook(e.market.tokenIDs[0]); ob == nil {
