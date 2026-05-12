@@ -25,6 +25,7 @@ type Observation struct {
 	MarketID string
 	// tokenId -> Token
 	Tokens      map[string]Token
+	TokenIds    []string
 	Probability float64
 	TimeLeftSec int64
 	Confidence  float64

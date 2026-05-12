@@ -11,6 +11,7 @@ import (
 	"github.com/xiangxn/polypilot/indicators"
 	"github.com/xiangxn/polypilot/internal/atomicx"
 	"github.com/xiangxn/polypilot/internal/buffer"
+	"github.com/xiangxn/polypilot/logx"
 	"github.com/xiangxn/polypilot/runtime"
 
 	"github.com/tidwall/gjson"
@@ -19,6 +20,8 @@ import (
 
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
+
+var log = logx.Module("observer")
 
 type Engine struct {
 	market marketState
@@ -103,6 +106,13 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 				return runtime.Observation{}, false
 			}
 
+			// check stale
+			latency := time.Now().UnixMilli() - orderBook.Timestamp
+			if latency > 500 {
+				log.Warn().Str("market", orderBook.Market).Int64("timestamp", orderBook.Timestamp).Int64("latency", latency).Msg("orderbook latency")
+				return runtime.Observation{}, false
+			}
+
 			token, ok := e.token.items[orderBook.AssetId]
 			if !ok {
 				return runtime.Observation{}, false
@@ -137,6 +147,8 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			obs.MarketID = orderBook.Market
 			obs.TimeLeftSec = e.market.endTime/1000 - time.Now().Unix()
 			obs.Tokens = CopyMap(e.token.items)
+			obs.TokenIds = make([]string, len(e.market.tokenIDs))
+			copy(obs.TokenIds, e.market.tokenIDs)
 			obs.GetOrderBook = func(tID string) *sdk.OrderBook {
 				return e.GetOrderBook(tID)
 			}
@@ -172,9 +184,13 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 		MarketID:    e.market.raw.Get("conditionId").String(),
 		TimeLeftSec: e.market.endTime/1000 - time.Now().Unix(),
 		Tokens:      CopyMap(e.token.items),
+		TokenIds:    make([]string, len(e.market.tokenIDs)),
 		GetOrderBook: func(tID string) *sdk.OrderBook {
 			return e.GetOrderBook(tID)
 		},
+	}
+	if len(e.market.tokenIDs) > 0 {
+		copy(obs.TokenIds, e.market.tokenIDs)
 	}
 
 	e.fillFeatures(&obs)
@@ -255,12 +271,15 @@ func (e *Engine) resetForNewMarket(obj gjson.Result) (runtime.Observation, bool)
 	}
 
 	conditionID := obj.Get("conditionId").String()
-	return runtime.Observation{
+	observation := runtime.Observation{
 		At:          time.Now().Unix(),
 		MarketID:    conditionID,
 		Tokens:      CopyMap(e.token.items),
+		TokenIds:    make([]string, len(e.market.tokenIDs)),
 		TimeLeftSec: e.market.endTime/1000 - time.Now().Unix(),
-	}, true
+	}
+	copy(observation.TokenIds, e.market.tokenIDs)
+	return observation, true
 }
 
 /**
@@ -276,6 +295,12 @@ func (e *Engine) GetOrderBook(tokenId string) *sdk.OrderBook {
 	}
 
 	ob, _ := v.Load().(*sdk.OrderBook)
+	// check stale
+	latency := time.Now().UnixMilli() - ob.Timestamp
+	if latency > 500 {
+		log.Warn().Str("market", ob.Market).Int64("timestamp", ob.Timestamp).Int64("latency", latency).Msg("orderbook latency")
+		return nil
+	}
 	return ob
 }
 
