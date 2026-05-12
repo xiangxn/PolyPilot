@@ -3,6 +3,7 @@ package probability
 import (
 	"context"
 	"maps"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -188,7 +189,9 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 
 func (e *Engine) fillFeatures(obs *runtime.Observation) {
 	obs.Features = make(map[string]any)
-	obs.Features["latestZ"] = e.signal.latestZ.Load()
+	latestZ := e.signal.latestZ.Load()
+	obs.Probability = Phi(latestZ)
+	obs.Features["latestZ"] = latestZ
 	if e.signal.zWindows != nil {
 		obs.Features["zWindows"] = e.signal.zWindows.Last(10)
 	}
@@ -347,4 +350,8 @@ func CopyOrderBook(src sdk.OrderBook) sdk.OrderBook {
 	}
 
 	return dst
+}
+
+func Phi(z float64) float64 {
+	return 0.5 * (1.0 + math.Erf(z/math.Sqrt2))
 }
