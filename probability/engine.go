@@ -102,8 +102,8 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 	case core.EventOrderBook:
 		if e.market.raw != nil && e.market.openPrice != 0 && e.market.endTime != 0 {
 
-			orderBook, ok := ev.Data.(sdk.OrderBook)
-			if !ok {
+			orderBook, ok := ev.Data.(*sdk.OrderBook)
+			if !ok || orderBook == nil {
 				return runtime.Observation{}, false
 			}
 
@@ -299,9 +299,8 @@ func (e *Engine) GetOrderBook(tokenId string) *sdk.OrderBook {
 		return nil
 	}
 	// check stale
-	latency := time.Now().UnixMilli() - ob.Timestamp
-	if latency > 500 {
-		log.Warn().Str("market", ob.Market).Int64("timestamp", ob.Timestamp).Int64("latency", latency).Msg("orderbook latency")
+	if ob.Latency > 500 {
+		log.Warn().Str("market", ob.Market).Int64("timestamp", ob.Timestamp).Int64("latency", ob.Latency).Msg("orderbook latency")
 		return nil
 	}
 	return ob

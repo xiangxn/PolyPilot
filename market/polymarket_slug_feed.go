@@ -3,9 +3,10 @@ package market
 import (
 	"context"
 	"fmt"
-	"github.com/xiangxn/polypilot/core"
 	"strings"
 	"time"
+
+	"github.com/xiangxn/polypilot/core"
 
 	"github.com/tidwall/gjson"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
@@ -57,7 +58,7 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 			cfg = sdk.DefaultConfig()
 		}
 		client := sdk.NewClient(cfg)
-		f.MarketMonitor = sdk.NewMarketMonitor(cfg.Polymarket.ClobWSBaseURL, client)
+		f.MarketMonitor = sdk.NewMarketMonitor(cfg.Polymarket.ClobWSBaseURL, false, client)
 	}
 
 	obChan := f.MarketMonitor.Subscribe()
