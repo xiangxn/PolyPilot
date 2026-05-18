@@ -75,8 +75,6 @@ func FetchERC20InfoMulticall3(
 		return nil, errors.New("multicall3 not configured for chain")
 	}
 
-	// log.Printf("token: %s, user: %s", token.String(), user.String())
-
 	erc20Parsed, _ := abi.JSON(strings.NewReader(erc20ABI))
 	mcParsed, _ := abi.JSON(strings.NewReader(multicall3ABI))
 
@@ -121,8 +119,6 @@ func FetchERC20InfoMulticall3(
 		return nil, err
 	}
 
-	// log.Printf("results: %+v", results)
-
 	info := &ERC20Info{
 		Token: token,
 	}
@@ -130,7 +126,9 @@ func FetchERC20InfoMulticall3(
 	// balanceOf
 	if results[0].Success {
 		var out *big.Int
-		_ = erc20Parsed.UnpackIntoInterface(&out, "balanceOf", results[0].ReturnData)
+		if err := erc20Parsed.UnpackIntoInterface(&out, "balanceOf", results[0].ReturnData); err != nil {
+			return nil, fmt.Errorf("multicall3 unpack balanceOf: %w", err)
+		}
 		info.Balance = out
 	} else {
 		info.Balance = big.NewInt(0)
@@ -138,14 +136,18 @@ func FetchERC20InfoMulticall3(
 
 	// decimals
 	if results[1].Success {
-		_ = erc20Parsed.UnpackIntoInterface(&info.Decimals, "decimals", results[1].ReturnData)
+		if err := erc20Parsed.UnpackIntoInterface(&info.Decimals, "decimals", results[1].ReturnData); err != nil {
+			return nil, fmt.Errorf("multicall3 unpack decimals: %w", err)
+		}
 	} else {
 		info.Decimals = 18
 	}
 
 	// symbol
 	if results[2].Success {
-		_ = erc20Parsed.UnpackIntoInterface(&info.Symbol, "symbol", results[2].ReturnData)
+		if err := erc20Parsed.UnpackIntoInterface(&info.Symbol, "symbol", results[2].ReturnData); err != nil {
+			return nil, fmt.Errorf("multicall3 unpack symbol: %w", err)
+		}
 	}
 
 	return info, nil

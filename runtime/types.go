@@ -73,7 +73,7 @@ type ExecutionAwareStrategy interface {
 }
 
 type RiskManager interface {
-	Check(orders []OrderIntent, snapshot state.Snapshot) error
+	Check(orders []OrderIntent, snapshot state.Snapshot, midPrices map[string]float64) error
 }
 
 type Executor interface {
@@ -115,6 +115,8 @@ type Engine struct {
 	executionExpired  atomic.Uint64
 	riskRejected      atomic.Uint64
 	ordersSent        atomic.Uint64
+	reconcileRuns     atomic.Uint64
+	reconcileDiffs    atomic.Uint64
 
 	orderMu   sync.RWMutex
 	intentSeq atomic.Uint64

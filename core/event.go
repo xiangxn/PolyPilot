@@ -41,6 +41,23 @@ type RiskEvent struct {
 	At     time.Time
 }
 
+type PositionExpiringEvent struct {
+	MarketID  string
+	EndTime   int64
+	TokenIDs  []string
+	Available map[string]float64
+}
+
+type ReconcileEvent struct {
+	Type       string // "ORDERS" | "POSITIONS" | "BOTH"
+	Added      int
+	Removed    int
+	Updated    int
+	DurationMs int64
+	Err        error
+	At         time.Time
+}
+
 type MetricsEvent struct {
 	Ticks             uint64
 	InputEvents       uint64
@@ -58,5 +75,9 @@ type MetricsEvent struct {
 	BusSubscribers    int
 	BalanceAvailable  float64
 	BalanceReserved   float64
+	UnrealizedPnL     float64
+	DailyPnL          float64
+	ReconcileRuns     uint64
+	ReconcileDiffs    uint64
 	At                time.Time
 }

@@ -24,6 +24,8 @@ balance_sync:
   collateral_token: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 sdk_config:
   polymarket:
+    chain_id: 137
+    funder_address: "0xtest-funder"
     owner_key: "%s"
 `, mustEncrypt(t, testDecryptPassword, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
 
@@ -62,6 +64,8 @@ balance_sync:
   interval: "5s"
 sdk_config:
   polymarket:
+    chain_id: 137
+    funder_address: "0xtest-funder"
     owner_key: "%s"
 `, mustEncrypt(t, testDecryptPassword, "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")))
 
@@ -86,6 +90,7 @@ func TestLoad_EnvOverride_SDKConfig(t *testing.T) {
 	tmp := t.TempDir()
 	writeConfig(t, tmp, fmt.Sprintf(`sdk_config:
   polymarket:
+    chain_id: 137
     funder_address: "0xyaml-funder"
     owner_key: "%s"
 `, mustEncrypt(t, testDecryptPassword, "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")))
@@ -107,6 +112,8 @@ func TestLoad_MinimalConfig_UsesInternalDefault(t *testing.T) {
 	tmp := t.TempDir()
 	writeConfig(t, tmp, fmt.Sprintf(`sdk_config:
   polymarket:
+    chain_id: 137
+    funder_address: "0xtest-funder"
     owner_key: "%s"
 `, mustEncrypt(t, testDecryptPassword, "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")))
 
@@ -128,6 +135,8 @@ func TestLoad_DecryptSensitiveFields_WithEnvPassword(t *testing.T) {
 
 	writeConfig(t, tmp, fmt.Sprintf(`sdk_config:
   polymarket:
+    chain_id: 137
+    funder_address: "0xtest-funder"
     owner_key: "%s"
     clob_creds:
       key: "%s"

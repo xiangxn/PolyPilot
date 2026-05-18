@@ -6,16 +6,14 @@ import (
 
 	"github.com/xiangxn/polypilot/core"
 	"github.com/xiangxn/polypilot/logx"
+	"github.com/xiangxn/polypilot/market"
 	"github.com/xiangxn/polypilot/runtime"
 	"github.com/xiangxn/polypilot/state"
 
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
-	"github.com/xiangxn/go-polymarket-sdk/utils"
 )
-
-const PlacePrice = 0.35
 
 var log = logx.Module("strategy")
 
@@ -27,12 +25,13 @@ type Strategy struct {
 }
 
 type StrategyConfig struct {
-	TimeLeftSec int64   `mapstructure:"timeleft_sec"`
-	MinInPrice  float64 `mapstructure:"min_in_price"`
-	InPrice     float64 `mapstructure:"in_price"`
-	InSize      float64 `mapstructure:"in_size"`
-	MinZ        float64 `mapstructure:"min_z"`
-	ZAgo        int     `mapstructure:"z_ago"`
+	TimeLeftSec    int64   `mapstructure:"timeleft_sec"`
+	MinInPrice     float64 `mapstructure:"min_in_price"`
+	InPrice        float64 `mapstructure:"in_price"`
+	InSize         float64 `mapstructure:"in_size"`
+	MinZ           float64 `mapstructure:"min_z"`
+	ZAgo           int     `mapstructure:"z_ago"`
+	MarketQueueCap int     `mapstructure:"market_queue_cap"`
 }
 
 func DefaultStrategyConfig() StrategyConfig {
@@ -52,21 +51,30 @@ func (s *Strategy) Init(bus *core.EventBus, ctx context.Context, cfg *viper.Vipe
 	sc := DefaultStrategyConfig()
 	if cfg != nil {
 		if sub := cfg.Sub("strategies.strategy"); sub != nil {
-			sub.Unmarshal(&sc)
+			if err := sub.Unmarshal(&sc); err != nil {
+				log.Warn().Err(err).Msg("strategy config unmarshal failed; using defaults")
+			}
 		}
 	}
 	s.config = sc
-	s.markets = NewMarketQueue(3)
+	capacity := sc.MarketQueueCap
+	if capacity <= 0 {
+		capacity = 3
+	}
+	s.markets = NewMarketQueue(capacity)
 }
 
 func (s *Strategy) OnExecution(ev core.ExecutionEvent, o runtime.Observation, snap state.Snapshot) []runtime.OrderIntent {
 	// 订单执行失败时，如果还有单边挂单就取消
 	if ev.Status == core.ExecutionStatusRejected && ev.Reason == core.ExecutionReasonTradeFailed {
-		market, exists := s.markets.Get(ev.MarketID)
+		info, exists := s.markets.Get(ev.MarketID)
 		if !exists {
 			return nil
 		}
-		tokenKeys := utils.GetStringArray(market, "clobTokenIds")
+		tokenKeys := info.TokenIDs
+		if len(tokenKeys) < 2 {
+			return nil
+		}
 		cancelId := ""
 		if tokenKeys[0] == ev.TokenID {
 			cancelId = tokenKeys[1]
@@ -102,7 +110,6 @@ func (s *Strategy) OnExecution(ev core.ExecutionEvent, o runtime.Observation, sn
 }
 
 func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state.Snapshot) []runtime.OrderIntent {
-	// log.Printf("Observation: %+v", o)
 	switch e.Type {
 	case core.EventMarket:
 		obj, ok := e.Data.(gjson.Result)
@@ -125,7 +132,10 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			return nil
 		}
 
-		s.markets.Add(o.MarketID, &obj)
+		sm, err := market.ParseSlugMarket(obj)
+		if err == nil {
+			s.markets.Add(o.MarketID, sm)
+		}
 
 		ins := make([]runtime.OrderIntent, 0, len(o.Tokens))
 		for _, t := range o.Tokens {
@@ -145,16 +155,14 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			return nil
 		}
 		// 判断zscore等信息是否应该止损
-		openPrice := o.Features["openPrice"].(float64)
-		if openPrice <= 0 { // 过滤掉数据未准备好的情况
+		openPrice, ok := o.Features["openPrice"].(float64)
+		if !ok || openPrice <= 0 { // 过滤掉数据未准备好的情况
 			return nil
 		}
 
-		latestPrice := o.Features["latestPrice"].(float64)
-		latestZ := o.Features["latestZ"].(float64)
-		zWindows := o.Features["zWindows"].([]float64)
-
-		// log.Printf("latestZ: %f, openPrice: %f, latestPrice: %f, ", latestZ, openPrice, latestPrice)
+		latestPrice, _ := o.Features["latestPrice"].(float64)
+		latestZ, _ := o.Features["latestZ"].(float64)
+		zWindows, _ := o.Features["zWindows"].([]float64)
 
 		// 实现止损/止盈逻辑
 		ins := make([]runtime.OrderIntent, 0)
@@ -174,7 +182,6 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			// 	dp = downPos.Available
 			// }
 			lnt := LastNGreaterThan(zWindows, s.config.ZAgo, s.config.MinZ)
-			// log.Printf("LZ: %f, LNT: %v, UPos: %f, DPos: %f, Ask: %f, PD: %f", latestZ, lnt, up, dp, upToken.AskPrice, latestPrice-openPrice)
 			if math.Abs(latestZ) > s.config.MinZ && lnt { // 价格出现单边趋势
 				// 判断当前涨跌
 				up := false // 默认为跌

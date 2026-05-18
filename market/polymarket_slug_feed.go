@@ -66,13 +66,36 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 	go f.MarketMonitor.Run(ctx)
 
 	go func() {
+		const maxConsecutiveFailures = 6
+		failures := 0
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			slug := f.slugFor(time.Now())
 			market, rawMarket, err := f.FetchMarketBySlug(slug)
 			if err != nil {
-				return
+				failures++
+				if failures >= maxConsecutiveFailures {
+					f.Bus.Publish(core.Event{
+						Type: core.EventRisk,
+						Data: core.RiskEvent{
+							Reason: fmt.Sprintf("polymarket feed fetch failed %d times slug=%s err=%v", failures, slug, err),
+							At:     time.Now(),
+						},
+					})
+					failures = 0 // reset to avoid event spam
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+					continue
+				}
 			}
-
+			failures = 0
 			f.Bus.Publish(core.Event{
 				Type: core.EventMarket,
 				Data: *rawMarket,
@@ -88,9 +111,9 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 			for {
 				select {
 				case <-ctx.Done():
+					timer.Stop()
 					return
 				case orderBook := <-obChan:
-					// log.Printf("orderBook: %+v", orderBook)
 					f.Bus.Publish(core.Event{
 						Type: core.EventOrderBook,
 						Data: orderBook,
@@ -181,4 +204,27 @@ func (f *PolymarketSlugFeed) ensureDefaults() {
 	if f.WindowMinutes <= 0 {
 		f.WindowMinutes = defaultWindowMinutes
 	}
+}
+
+// ParseSlugMarket constructs a SlugMarket from a raw market JSON gjson.Result.
+// Returns an error if essential fields are missing.
+func ParseSlugMarket(result gjson.Result) (SlugMarket, error) {
+	tokenIDs := utils.GetStringArray(&result, "clobTokenIds")
+	if len(tokenIDs) == 0 {
+		return SlugMarket{}, fmt.Errorf("no clobTokenIds")
+	}
+	endDate, _ := utils.ToTimestamp(result.Get("endDate").String())
+	startDate, _ := utils.ToTimestamp(result.Get("startDate").String())
+	return SlugMarket{
+		MarketID:         result.Get("conditionId").String(),
+		TokenIDs:         tokenIDs,
+		Prices:           utils.GetFloatArray(&result, "outcomePrices"),
+		EndDate:          endDate,
+		ResolutionSource: result.Get("resolutionSource").String(),
+		TickSize:         result.Get("orderPriceMinTickSize").Float(),
+		NegRisk:          result.Get("negRisk").Bool(),
+		StartDate:        startDate,
+		Closed:           result.Get("closed").Bool(),
+		Outcomes:         utils.GetStringArray(&result, "outcomes"),
+	}, nil
 }

@@ -24,6 +24,9 @@ type Config struct {
 	BalanceSync BalanceSyncConfig  `mapstructure:"balance_sync"`
 	Logging     logx.LoggingConfig `mapstructure:"logging"`
 	SDKConfig   sdk.Config         `mapstructure:"sdk_config"`
+	Risk        RiskConfig         `mapstructure:"risk"`
+	Reconcile   ReconcileConfig    `mapstructure:"reconcile"`
+	Redeem      RedeemConfig       `mapstructure:"redeem"`
 }
 
 type BalanceSyncConfig struct {
@@ -32,6 +35,23 @@ type BalanceSyncConfig struct {
 	Interval        time.Duration `mapstructure:"interval"`
 	Epsilon         float64       `mapstructure:"epsilon"`
 	CollateralToken string        `mapstructure:"collateral_token"`
+}
+
+type RiskConfig struct {
+	MaxDailyLoss         float64       `mapstructure:"max_daily_loss"`
+	MaxExposurePerMarket float64       `mapstructure:"max_exposure_per_market"`
+	MaxSlippageBps       int           `mapstructure:"max_slippage_bps"`
+	MaxOpenOrders        int           `mapstructure:"max_open_orders"`
+	MarketCooldown       time.Duration `mapstructure:"market_cooldown"`
+}
+
+type ReconcileConfig struct {
+	Interval     time.Duration   `mapstructure:"interval"`
+	RetryBackoff []time.Duration `mapstructure:"retry_backoff"`
+}
+
+type RedeemConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 func Load() (Config, *viper.Viper, error) {
@@ -54,6 +74,18 @@ func Load() (Config, *viper.Viper, error) {
 	cfg := Config{
 		ChainRPCURL: "https://polygon.drpc.org",
 		Logging:     logx.DefaultConfig(),
+		Risk: RiskConfig{
+			MaxDailyLoss:         20.0,
+			MaxExposurePerMarket: 100.0,
+			MaxSlippageBps:       200,
+			MaxOpenOrders:        20,
+			MarketCooldown:       2 * time.Second,
+		},
+		Reconcile: ReconcileConfig{
+			Interval:     30 * time.Second,
+			RetryBackoff: []time.Duration{time.Second, 2 * time.Second, 4 * time.Second},
+		},
+		Redeem: RedeemConfig{Enabled: false},
 	}
 	if defaultSDKCfg != nil {
 		cfg.SDKConfig = *defaultSDKCfg
@@ -74,6 +106,16 @@ func Load() (Config, *viper.Viper, error) {
 	}
 	if cfg.SDKConfig.Polymarket.OwnerKey != "" {
 		cfg.SDKConfig.Polymarket.OwnerKey = strings.TrimPrefix(strings.TrimSpace(cfg.SDKConfig.Polymarket.OwnerKey), "0x")
+	}
+
+	if cfg.SDKConfig.Polymarket.FunderAddress == "" {
+		return Config{}, nil, fmt.Errorf("config: sdk_config.polymarket.funder_address is required")
+	}
+	if cfg.SDKConfig.Polymarket.OwnerKey == "" {
+		return Config{}, nil, fmt.Errorf("config: sdk_config.polymarket.owner_key is required (encrypted or env)")
+	}
+	if cfg.SDKConfig.Polymarket.ChainID == 0 {
+		return Config{}, nil, fmt.Errorf("config: sdk_config.polymarket.chain_id is required")
 	}
 
 	return cfg, v, nil

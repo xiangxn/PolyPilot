@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/xiangxn/go-polymarket-sdk/orders"
+	"github.com/xiangxn/polypilot/core"
 )
 
 const defaultPositionsAPILimit = 500
@@ -71,7 +72,7 @@ func (s *State) RestoreFromExchange(ctx context.Context) ([]string, error) {
 		if remainingSize <= 0 {
 			continue
 		}
-		reserved := requiredCollateral(side, order.Price, remainingSize)
+		reserved := core.RequiredCollateral(side, order.Price, remainingSize)
 		if reserved <= 0 {
 			continue
 		}

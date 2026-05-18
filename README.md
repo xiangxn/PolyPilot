@@ -161,3 +161,74 @@ go test -race ./runtime/... -v
 
 - 已覆盖：`risk.Check`、`state` 三级预留状态机、`runtime.handleExecutionEvent` 乱序场景、`config.Load` 加密解密、`slugFor` 时间窗口。
 - 命令：`go test -race -cover ./...`（当前 review 未执行实跑，建议执行后把覆盖率截图入库）。
+
+---
+
+## 重构记录
+
+### Refactor @ 2026-05-18 → 完成
+
+**Spec**: `docs/superpowers/specs/2026-05-18-refactor-b-level.md`
+**Plan**: `docs/superpowers/plans/2026-05-18-refactor-b-level.md`
+**Scope**: B 级（包内重构，对外形态不变）+ 22 条 review 问题 + 10 条策略优化 + Polymarket 权威对账 + 完整测试
+
+#### 改动一览
+
+| 类别 | 改动 |
+|---|---|
+| 工程基础 | `core/errors.go` 集中 sentinel error；`core/pricing.go` 抽 `RequiredCollateral`/`FloatEpsilon`；`.golangci.yml` |
+| 错误处理 | `errors.Is` 替换字符串比较；自定义 `risk.Rejection` 类型 |
+| 依赖注入 | `probability.NewEngine(client)`；`Executor.relayClient` 字段一次构造 |
+| 文件拆分 | `runtime/{event_handler,order_tracking,metrics}.go`；`state/{reservation,fill,reconcile,pnl,position_expiring}.go`；`execution/{placements,splits_merges,trade_events}.go`；`probability/{market_state,features,book_store}.go` |
+| 风控硬墙 | `MaxDailyLoss` / `MaxExposurePerMarket` / `MaxSlippageBps` / `MaxOpenOrders` / `MarketCooldown` + 9 类 `RejectionType` |
+| 持仓增强 | `TokenPosition.AvgCost` / `AvgCostKnown`；`State.UnrealizedPnL`；`EventPositionExpiring` |
+| 状态机收敛 | `state.AttachOrder` / `AttachExternalOrder` 单入口；移除字符串错误比较 |
+| 可观测 | `Executor.DryRun`；`EventBus.DropThreshold`；`EventReconcile` 事件 |
+| Polymarket 权威对账 | `state.ReconcileWithExchange` 30s 定时 + WS 即时触发；以远端为准；外部订单 `ExternalOrigin=true` 计入风控 |
+| 配置 | `risk` / `reconcile` / `redeem` 三个 section，保守默认开启；启动校验 `funder_address` / `owner_key` / `chain_id` |
+| 韧性 | Feed 失败重试不退出；Executor shutdown drain；probability reset RPC 移出锁外（generation 计数器防并发竞态） |
+| 测试 | 各包均补齐测试；race test 覆盖关键并发点 |
+
+#### 收益
+
+| 维度 | 之前 | 现在 |
+|---|---|---|
+| 风险 | 余额够就下单 | 5 道硬墙：daily PnL / exposure / slippage / open orders / cooldown |
+| 一致性 | 本地账本 vs 远端可脱节 | 30s 定时 + WS 触发双驱动对账，远端为权威源 |
+| 可观测 | 5 分钟一次 metrics log | + `UnrealizedPnL` + `DailyPnL` + `ReconcileRuns/Diffs` + `RejectionType` 枚举可聚合 |
+| 可测性 | 仅 state/risk/runtime 部分覆盖 | 全包补齐；mock 接口分离；race test 系统化 |
+| 可维护性 | 单文件 500–900 行 | 单文件 < 400 行；职责单一 |
+
+#### 用户使用说明
+
+**手动在 Polymarket 操作的兼容性**：
+- 手动挂单后 ≤ 30s 本地账本自动同步（标记 `ExternalOrigin=true`），并计入 `max_open_orders` / `max_exposure_per_market` 风控限额
+- 手动取消订单 ≤ 30s 本地 release
+- 手动卖出仓位 ≤ 30s 本地 position 减少；本地 `AvgCost` 按比例保留；新出现的 token 标记 `AvgCostKnown=false`，不参与 `UnrealizedPnL` 计算
+
+**新增配置项（`config.yaml`）**：
+
+```yaml
+risk:
+  max_daily_loss: 20.0          # USDC，超过拒绝所有 PLACE（CANCEL 仍允许）
+  max_exposure_per_market: 100  # 单 market reserved+filled 上限
+  max_slippage_bps: 200         # 2%，市价单偏离 mid 拒绝
+  max_open_orders: 20           # 同时挂单总数（含 ExternalOrigin）
+  market_cooldown: 2s           # 同 market 两次本地 PLACE 间隔
+
+reconcile:
+  interval: 30s                 # 周期对账频率
+  retry_backoff: [1s, 2s, 4s]   # 失败重试
+
+redeem:
+  enabled: false                # redeem 当前仍为 TODO 状态，需要时再开启
+```
+
+所有时间字段统一使用 **UTC+0**。
+
+#### 已知后续工作（C 级，本次未做）
+
+- State 持久化（SQLite）— 重启后能保留 finalized OrderID，避免 WS 重放导致重复处理
+- Strategy 接口拆 Signal/Sizing/Execution 三层
+- 离线回测框架（基于 historical orderbook replay）
+- 持续部署 / Dockerfile / k8s 清单

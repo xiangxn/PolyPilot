@@ -17,6 +17,9 @@ const (
 	EventStrategy  EventType = "STRATEGY"
 	EventSystem    EventType = "SYSTEM"
 	EventMetrics   EventType = "METRICS"
+	// 仓位临近到期预警
+	EventPositionExpiring EventType = "POSITION_EXPIRING"
+	EventReconcile        EventType = "RECONCILE"
 )
 
 const (
