@@ -99,7 +99,7 @@ func (e *Engine) Start(ctx context.Context) {
 					return
 				}
 				switch ev.Type {
-				case core.EventMarket, core.EventOrderBook, core.EventSignal:
+				case core.EventMarket, core.EventOrderBook, core.EventExternalPrice:
 					e.inputEvents.Add(1)
 					e.handleInputUpdate(ev)
 

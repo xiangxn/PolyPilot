@@ -2,6 +2,7 @@ package market
 
 import (
 	"context"
+
 	"github.com/xiangxn/polypilot/core"
 
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
@@ -47,7 +48,7 @@ func (c *CryptoPriceFeed) Start(ctx context.Context) {
 				// log.Printf("data: %+v", data)
 				if ok {
 					c.Bus.Publish(core.Event{
-						Type: core.EventSignal,
+						Type: core.EventExternalPrice,
 						Data: data,
 					})
 				}
