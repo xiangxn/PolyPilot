@@ -204,7 +204,7 @@ func TestOnExecution_TradeFailed_CancelOpposite_NoPosition(t *testing.T) {
 }
 
 func TestMarketQueue_Delete(t *testing.T) {
-	q := NewMarketQueue(3)
+	q := NewQueueMap[market.SlugMarket](3)
 	q.Add("m1", market.SlugMarket{MarketID: "m1"})
 	q.Add("m2", market.SlugMarket{MarketID: "m2"})
 	q.Delete("m1")

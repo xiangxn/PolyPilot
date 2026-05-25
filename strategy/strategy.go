@@ -19,7 +19,7 @@ var log = logx.Module("strategy")
 
 type Strategy struct {
 	Bus     *core.EventBus
-	markets *MarketQueue
+	markets *QueueMap[market.SlugMarket]
 
 	config StrategyConfig
 }
@@ -61,7 +61,7 @@ func (s *Strategy) Init(bus *core.EventBus, ctx context.Context, cfg *viper.Vipe
 	if capacity <= 0 {
 		capacity = 3
 	}
-	s.markets = NewMarketQueue(capacity)
+	s.markets = NewQueueMap[market.SlugMarket](capacity)
 }
 
 func (s *Strategy) OnExecution(ev core.ExecutionEvent, o runtime.Observation, snap state.Snapshot) []runtime.OrderIntent {
