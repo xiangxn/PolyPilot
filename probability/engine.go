@@ -52,6 +52,7 @@ type signalState struct {
 	zscore      *indicators.ZScore
 	latestZ     atomicx.Float64
 	zWindows    *buffer.RingBuffer
+	latestProb  atomicx.Float64
 }
 
 type tokenState struct {
@@ -176,6 +177,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			obs.At = orderBook.Timestamp
 			obs.MarketID = orderBook.Market
 			obs.TimeLeftSec = e.market.endTime/1000 - time.Now().Unix()
+      obs.Probability = e.signal.latestProb.Load()
 			obs.Tokens = CopyMap(e.token.items)
 			obs.TokenIds = make([]string, len(e.market.tokenIDs))
 			copy(obs.TokenIds, e.market.tokenIDs)
@@ -185,8 +187,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			e.fillFeaturesLocked(&obs)
 			return obs, true
 		}
-
-	case core.EventSignal:
+	case core.EventExternalPrice:
 		data, ok := ev.Data.(sdk.ExternalPrice)
 		if !ok {
 			return runtime.Observation{}, false
@@ -210,6 +211,11 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 				e.signal.latestZ.Store(z)
 			}
 		}
+	case core.EventProbability:
+		prop, ok := ev.Data.(float64)
+		if ok {
+			e.signal.latestProb.Store(prop)
+		}
 	}
 	return runtime.Observation{}, false
 }
@@ -226,6 +232,7 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 		At:          time.Now().Unix(),
 		MarketID:    e.market.raw.Get("conditionId").String(),
 		TimeLeftSec: e.market.endTime/1000 - time.Now().Unix(),
+		Probability: e.signal.latestProb.Load(),
 		Tokens:      CopyMap(e.token.items),
 		TokenIds:    make([]string, len(e.market.tokenIDs)),
 		GetOrderBook: func(tID string) *sdk.OrderBook {

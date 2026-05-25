@@ -10,7 +10,8 @@ const (
 	EventMarket EventType = "MARKET"
 	// 订单薄更新
 	EventOrderBook EventType = "ORDERBOOK"
-	EventSignal    EventType = "SIGNAL"
+	EventExternalPrice EventType = "EXTERNAL_PRICE"
+	EventProbability   EventType = "PROBABILITY"
 	EventOrder     EventType = "ORDER"
 	EventExecution EventType = "EXECUTION"
 	EventRisk      EventType = "RISK"
