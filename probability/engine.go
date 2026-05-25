@@ -31,6 +31,7 @@ var log = logx.Module("probability")
 // signal.latestPrice / signal.latestZ 使用 atomicx.Float64，
 // 这些字段不受 mu 保护。
 type Engine struct {
+	Symbol     string
 	mu         sync.RWMutex
 	market     marketState
 	signal     signalState
@@ -67,8 +68,8 @@ type bookState struct {
 // NewEngine constructs a probability Engine that uses the provided Polymarket
 // SDK client for RPC calls (order books, open price). Passing nil falls back
 // to sdk.NewClient(sdk.DefaultConfig()) at first use — useful for tests.
-func NewEngine(client *sdk.PolymarketClient) *Engine {
-	return &Engine{client: client}
+func NewEngine(symbol string, client *sdk.PolymarketClient) *Engine {
+	return &Engine{Symbol: symbol, client: client}
 }
 
 func CopyMap[K comparable, V any](src map[K]V) map[K]V {
@@ -177,7 +178,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			obs.At = orderBook.Timestamp
 			obs.MarketID = orderBook.Market
 			obs.TimeLeftSec = e.market.endTime/1000 - time.Now().Unix()
-      obs.Probability = e.signal.latestProb.Load()
+			obs.Probability = e.signal.latestProb.Load()
 			obs.Tokens = CopyMap(e.token.items)
 			obs.TokenIds = make([]string, len(e.market.tokenIDs))
 			copy(obs.TokenIds, e.market.tokenIDs)

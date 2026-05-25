@@ -10,7 +10,6 @@ import (
 func (e *Engine) fillFeaturesLocked(obs *runtime.Observation) {
 	obs.Features = make(map[string]any)
 	latestZ := e.signal.latestZ.Load()
-	obs.Probability = Phi(latestZ)
 	obs.Features["latestZ"] = latestZ
 	if e.signal.zWindows != nil {
 		obs.Features["zWindows"] = e.signal.zWindows.Last(10)

@@ -40,7 +40,7 @@ func (e *Engine) prepareReset(obj gjson.Result) *resetPrep {
 	if err != nil {
 		return nil
 	}
-	cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, "btc")
+	cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, e.Symbol)
 	openPrice := cpm.FetchOpenPrice(&obj)
 	if openPrice == 0 {
 		return nil

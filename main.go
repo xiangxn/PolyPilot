@@ -75,7 +75,7 @@ func main() {
 			&market.CryptoPriceFeed{MonitoSymble: "btc", MonitorType: sdk.MonitorChainlink},
 		},
 		Observers:   []runtime.Observer{&observer.Logger{}},
-		Probability: probability.NewEngine(sharedClient),
+		Probability: probability.NewEngine("btc", sharedClient),
 		Strategies:  []runtime.Strategy{&strategy.Strategy{}},
 	}
 

@@ -76,11 +76,11 @@ func TestCopyOrderBook_NilSlices(t *testing.T) {
 
 func TestNewEngine_StoresClient(t *testing.T) {
 	c := sdk.NewClient(sdk.DefaultConfig())
-	e := NewEngine(c)
+	e := NewEngine("btc", c)
 	if e.client != c {
 		t.Fatal("NewEngine should store provided client")
 	}
-	e2 := NewEngine(nil)
+	e2 := NewEngine("btc", nil)
 	if e2.client != nil {
 		t.Fatal("nil client should be retained as nil")
 	}
@@ -329,7 +329,7 @@ func TestOnUpdate_EventOrderBook_ZScoreReady_ReturnsObservation(t *testing.T) {
 
 func TestOnUpdate_EventSignal_BadType_NoOp(t *testing.T) {
 	e := &Engine{}
-	if _, ok := e.OnUpdate(core.Event{Type: core.EventSignal, Data: "wrong"}); ok {
+	if _, ok := e.OnUpdate(core.Event{Type: core.EventExternalPrice, Data: "wrong"}); ok {
 		t.Fatal("expected !ok")
 	}
 }
@@ -341,7 +341,7 @@ func TestOnUpdate_EventSignal_OpenPriceZero_NoOp(t *testing.T) {
 	e.Init(ctx)
 	// openPrice is 0
 	ev := core.Event{
-		Type: core.EventSignal,
+		Type: core.EventExternalPrice,
 		Data: sdk.ExternalPrice{Price: 100, Timestamp: time.Now().UnixMilli()},
 	}
 	if _, ok := e.OnUpdate(ev); ok {
@@ -361,7 +361,7 @@ func TestOnUpdate_EventSignal_UpdatesLatestPrice(t *testing.T) {
 	e.market.endTime = time.Now().Add(time.Hour).UnixMilli()
 
 	ev := core.Event{
-		Type: core.EventSignal,
+		Type: core.EventExternalPrice,
 		Data: sdk.ExternalPrice{Price: 105, Timestamp: time.Now().UnixMilli()},
 	}
 	_, _ = e.OnUpdate(ev)
@@ -392,7 +392,7 @@ func TestOnUpdate_EventSignal_ZScoreReady_ComputesZ(t *testing.T) {
 	e.market.endTime = time.Now().Add(time.Hour).UnixMilli()
 
 	ev := core.Event{
-		Type: core.EventSignal,
+		Type: core.EventExternalPrice,
 		Data: sdk.ExternalPrice{Price: 105, Timestamp: 3000000},
 	}
 	_, _ = e.OnUpdate(ev)
@@ -423,7 +423,7 @@ func TestOnUpdate_EventSignal_ZReadyButTimeLeftZero(t *testing.T) {
 	e.market.endTime = time.Now().Add(-time.Hour).UnixMilli()
 
 	ev := core.Event{
-		Type: core.EventSignal,
+		Type: core.EventExternalPrice,
 		Data: sdk.ExternalPrice{Price: 105, Timestamp: 3000000},
 	}
 	_, _ = e.OnUpdate(ev)

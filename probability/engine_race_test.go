@@ -83,7 +83,7 @@ func TestRace_OnUpdateVsCurrentObservation(t *testing.T) {
 	// 写者 3: EventSignal → 写 signal.latestPrice / latestZ (atomic) + 读 market.openPrice
 	spawn(func() {
 		e.OnUpdate(core.Event{
-			Type: core.EventSignal,
+			Type: core.EventExternalPrice,
 			Data: sdk.ExternalPrice{Price: 100.5, Timestamp: time.Now().UnixMilli()},
 		})
 	})
