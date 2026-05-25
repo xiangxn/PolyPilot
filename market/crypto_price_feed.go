@@ -45,7 +45,6 @@ func (c *CryptoPriceFeed) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case data, ok := <-priceCh:
-				// log.Printf("data: %+v", data)
 				if ok {
 					c.Bus.Publish(core.Event{
 						Type: core.EventExternalPrice,

@@ -39,14 +39,20 @@ func (l *Logger) Start(ctx context.Context) {
 func (l *Logger) logEvent(e core.Event) {
 	switch e.Type {
 	case core.EventMarket:
-		data := e.Data.(gjson.Result)
+		data, ok := e.Data.(gjson.Result)
+		if !ok {
+			return
+		}
 		log.Info().
 			Str("event", string(e.Type)).
 			Str("question", data.Get("question").String()).
 			Str("end_date", data.Get("endDate").String()).
 			Msg("observer event")
 	case core.EventExecution:
-		data := e.Data.(core.ExecutionEvent)
+		data, ok := e.Data.(core.ExecutionEvent)
+		if !ok {
+			return
+		}
 		log.Info().
 			Str("event", string(e.Type)).
 			Str("order_id", data.OrderID).
@@ -61,14 +67,20 @@ func (l *Logger) logEvent(e core.Event) {
 			Time("at", data.At).
 			Msg("observer event")
 	case core.EventRisk:
-		data := e.Data.(core.RiskEvent)
+		data, ok := e.Data.(core.RiskEvent)
+		if !ok {
+			return
+		}
 		log.Info().
 			Str("event", string(e.Type)).
 			Str("reason", data.Reason).
 			Time("at", data.At).
 			Msg("observer event")
 	case core.EventMetrics:
-		data := e.Data.(core.MetricsEvent)
+		data, ok := e.Data.(core.MetricsEvent)
+		if !ok {
+			return
+		}
 		log.Info().
 			Str("event", string(e.Type)).
 			Uint64("input_events", data.InputEvents).
@@ -87,7 +99,41 @@ func (l *Logger) logEvent(e core.Event) {
 			Int("subscribers", data.BusSubscribers).
 			Float64("balance_available", data.BalanceAvailable).
 			Float64("balance_reserved", data.BalanceReserved).
+			Float64("unrealized_pnl", data.UnrealizedPnL).
+			Float64("daily_pnl", data.DailyPnL).
+			Uint64("reconcile_runs", data.ReconcileRuns).
+			Uint64("reconcile_diffs", data.ReconcileDiffs).
 			Time("at", data.At).
 			Msg("observer event")
+	case core.EventPositionExpiring:
+		data, ok := e.Data.(core.PositionExpiringEvent)
+		if !ok {
+			return
+		}
+		log.Info().
+			Str("event", string(e.Type)).
+			Str("market_id", data.MarketID).
+			Int64("end_time", data.EndTime).
+			Int("tokens", len(data.TokenIDs)).
+			Msg("position expiring")
+	case core.EventReconcile:
+		data, ok := e.Data.(core.ReconcileEvent)
+		if !ok {
+			return
+		}
+		errMsg := ""
+		if data.Err != nil {
+			errMsg = data.Err.Error()
+		}
+		log.Info().
+			Str("event", string(e.Type)).
+			Str("type", data.Type).
+			Int("added", data.Added).
+			Int("removed", data.Removed).
+			Int("updated", data.Updated).
+			Int64("duration_ms", data.DurationMs).
+			Str("err", errMsg).
+			Time("at", data.At).
+			Msg("reconcile")
 	}
 }

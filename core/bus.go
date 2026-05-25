@@ -12,12 +12,21 @@ type BusStats struct {
 }
 
 type EventBus struct {
-	mu        sync.RWMutex
-	subs      map[uint64]chan Event
-	nextID    uint64
-	closed    bool
-	published atomic.Uint64
-	dropped   atomic.Uint64
+	mu               sync.RWMutex
+	subs             map[uint64]chan Event
+	nextID           uint64
+	closed           bool
+	published        atomic.Uint64
+	dropped          atomic.Uint64
+	lastWarnedAtDrop atomic.Uint64
+
+	// DropThreshold: if > 0, OnDropThreshold is invoked every time the total
+	// dropped count crosses another DropThreshold boundary. Zero disables.
+	DropThreshold uint64
+	// OnDropThreshold is called with the cumulative dropped count when a
+	// threshold boundary is crossed. Invoked in a goroutine; must not block
+	// indefinitely.
+	OnDropThreshold func(droppedTotal uint64)
 }
 
 func NewEventBus() *EventBus {
@@ -72,6 +81,15 @@ func (b *EventBus) Publish(e Event) {
 		case s <- e:
 		default:
 			b.dropped.Add(1)
+			if b.DropThreshold > 0 && b.OnDropThreshold != nil {
+				total := b.dropped.Load()
+				last := b.lastWarnedAtDrop.Load()
+				if total/b.DropThreshold > last/b.DropThreshold {
+					if b.lastWarnedAtDrop.CompareAndSwap(last, total) {
+						go b.OnDropThreshold(total)
+					}
+				}
+			}
 		}
 	}
 }

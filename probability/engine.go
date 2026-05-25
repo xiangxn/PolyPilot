@@ -3,7 +3,6 @@ package probability
 import (
 	"context"
 	"maps"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,18 +16,28 @@ import (
 
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
-	"github.com/xiangxn/go-polymarket-sdk/utils"
 
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
-var log = logx.Module("observer")
+var log = logx.Module("probability")
 
+// Engine 不可在多个独立 goroutine 中直接读写其字段。所有非 atomic
+// 字段（market.*、token.items）的并发访问由 mu 串行化：
+//   - 写路径：OnUpdate 的 EventMarket / EventOrderBook 分支（Lock）
+//   - 读路径：CurrentObservation、EventSignal 分支（RLock）
+//
+// book.* 与 signal.zscore / signal.zWindows 各自持有内部锁，
+// signal.latestPrice / signal.latestZ 使用 atomicx.Float64，
+// 这些字段不受 mu 保护。
 type Engine struct {
-	market marketState
-	signal signalState
-	token  tokenState
-	book   bookState
+	mu         sync.RWMutex
+	market     marketState
+	signal     signalState
+	token      tokenState
+	book       bookState
+	client     *sdk.PolymarketClient
+	generation atomic.Uint64
 }
 
 type marketState struct {
@@ -53,6 +62,13 @@ type tokenState struct {
 type bookState struct {
 	mu    sync.RWMutex
 	books map[string]*atomic.Value
+}
+
+// NewEngine constructs a probability Engine that uses the provided Polymarket
+// SDK client for RPC calls (order books, open price). Passing nil falls back
+// to sdk.NewClient(sdk.DefaultConfig()) at first use — useful for tests.
+func NewEngine(client *sdk.PolymarketClient) *Engine {
+	return &Engine{client: client}
 }
 
 func CopyMap[K comparable, V any](src map[K]V) map[K]V {
@@ -97,68 +113,102 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			return runtime.Observation{}, false
 		}
 		conditionID := obj.Get("conditionId").String()
-		if e.market.raw == nil || conditionID != e.market.raw.Get("conditionId").String() || e.market.openPrice == 0 {
-			return e.resetForNewMarket(obj)
+
+		e.mu.RLock()
+		needReset := e.market.raw == nil || conditionID != e.market.raw.Get("conditionId").String() || e.market.openPrice == 0
+		gen := e.generation.Load()
+		e.mu.RUnlock()
+
+		if !needReset {
+			return runtime.Observation{}, false
 		}
+
+		prep := e.prepareReset(obj) // RPC outside lock
+		if prep == nil {
+			return runtime.Observation{}, false
+		}
+
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if e.generation.Load() != gen {
+			// another reset happened while we were doing RPC; skip
+			return runtime.Observation{}, false
+		}
+		return e.resetForNewMarketLocked(obj, prep)
+
 	case core.EventOrderBook:
-		if e.market.raw != nil && e.market.openPrice != 0 && e.market.endTime != 0 {
+		orderBook, ok := ev.Data.(*sdk.OrderBook)
+		if !ok || orderBook == nil {
+			return runtime.Observation{}, false
+		}
 
-			orderBook, ok := ev.Data.(*sdk.OrderBook)
-			if !ok || orderBook == nil {
-				return runtime.Observation{}, false
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if e.market.raw == nil || e.market.openPrice == 0 || e.market.endTime == 0 {
+			return runtime.Observation{}, false
+		}
+
+		token, ok := e.token.items[orderBook.AssetId]
+		if !ok {
+			return runtime.Observation{}, false
+		}
+
+		e.updateOrderBook(orderBook.AssetId, func(old *sdk.OrderBook) *sdk.OrderBook {
+			return &sdk.OrderBook{
+				AssetId:   orderBook.AssetId,
+				Market:    orderBook.Market,
+				Timestamp: orderBook.Timestamp,
+				Asks:      append([]orders.Book(nil), orderBook.Asks...),
+				Bids:      append([]orders.Book(nil), orderBook.Bids...),
 			}
+		})
 
-			token, ok := e.token.items[orderBook.AssetId]
-			if !ok {
-				return runtime.Observation{}, false
+		if len(orderBook.Asks) > 0 {
+			token.AskPrice = orderBook.Asks[len(orderBook.Asks)-1].Price
+		}
+		if len(orderBook.Bids) > 0 {
+			token.BidPrice = orderBook.Bids[len(orderBook.Bids)-1].Price
+		}
+
+		e.token.items[orderBook.AssetId] = token
+
+		if e.signal.zscore.IsReady() {
+			var obs runtime.Observation
+			obs.At = orderBook.Timestamp
+			obs.MarketID = orderBook.Market
+			obs.TimeLeftSec = e.market.endTime/1000 - time.Now().Unix()
+      obs.Probability = e.signal.latestProb.Load()
+			obs.Tokens = CopyMap(e.token.items)
+			obs.TokenIds = make([]string, len(e.market.tokenIDs))
+			copy(obs.TokenIds, e.market.tokenIDs)
+			obs.GetOrderBook = func(tID string) *sdk.OrderBook {
+				return e.GetOrderBook(tID)
 			}
-
-			e.updateOrderBook(orderBook.AssetId, func(old *sdk.OrderBook) *sdk.OrderBook {
-				return &sdk.OrderBook{
-					AssetId:   orderBook.AssetId,
-					Market:    orderBook.Market,
-					Timestamp: orderBook.Timestamp,
-					Asks:      append([]orders.Book(nil), orderBook.Asks...),
-					Bids:      append([]orders.Book(nil), orderBook.Bids...),
-				}
-			})
-
-			if len(orderBook.Asks) > 0 {
-				token.AskPrice = orderBook.Asks[len(orderBook.Asks)-1].Price
-			}
-			if len(orderBook.Bids) > 0 {
-				token.BidPrice = orderBook.Bids[len(orderBook.Bids)-1].Price
-			}
-
-			e.token.items[orderBook.AssetId] = token
-
-			if e.signal.zscore.IsReady() {
-				var obs runtime.Observation
-				obs.At = orderBook.Timestamp
-				obs.MarketID = orderBook.Market
-				obs.TimeLeftSec = e.market.endTime/1000 - time.Now().Unix()
-				obs.Probability = e.signal.latestProb.Load()
-				obs.Tokens = CopyMap(e.token.items)
-				obs.TokenIds = make([]string, len(e.market.tokenIDs))
-				copy(obs.TokenIds, e.market.tokenIDs)
-				obs.GetOrderBook = func(tID string) *sdk.OrderBook {
-					return e.GetOrderBook(tID)
-				}
-				e.fillFeatures(&obs)
-				return obs, true
-			}
+			e.fillFeaturesLocked(&obs)
+			return obs, true
 		}
 	case core.EventExternalPrice:
 		data, ok := ev.Data.(sdk.ExternalPrice)
-		if ok && e.market.openPrice != 0 {
-			e.signal.latestPrice.Store(data.Price)
-			e.signal.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
-			if e.signal.zscore.IsReady() {
-				timeLeft := e.market.endTime/1000 - time.Now().Unix()
-				if timeLeft >= 1 {
-					z := e.signal.zscore.ZScore(data.Price, e.market.openPrice, float64(timeLeft))
-					e.signal.latestZ.Store(z)
-				}
+		if !ok {
+			return runtime.Observation{}, false
+		}
+
+		e.mu.RLock()
+		openPrice := e.market.openPrice
+		endTime := e.market.endTime
+		e.mu.RUnlock()
+
+		if openPrice == 0 {
+			return runtime.Observation{}, false
+		}
+
+		e.signal.latestPrice.Store(data.Price)
+		e.signal.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
+		if e.signal.zscore.IsReady() {
+			timeLeft := endTime/1000 - time.Now().Unix()
+			if timeLeft >= 1 {
+				z := e.signal.zscore.ZScore(data.Price, openPrice, float64(timeLeft))
+				e.signal.latestZ.Store(z)
 			}
 		}
 	case core.EventProbability:
@@ -171,6 +221,9 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 }
 
 func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
 	if e.market.raw == nil || e.market.endTime == 0 {
 		return runtime.Observation{}, false
 	}
@@ -190,174 +243,7 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 		copy(obs.TokenIds, e.market.tokenIDs)
 	}
 
-	e.fillFeatures(&obs)
+	e.fillFeaturesLocked(&obs)
 
 	return obs, true
-}
-
-func (e *Engine) fillFeatures(obs *runtime.Observation) {
-	obs.Features = make(map[string]any)
-	latestZ := e.signal.latestZ.Load()
-	obs.Features["latestZ"] = latestZ
-	if e.signal.zWindows != nil {
-		obs.Features["zWindows"] = e.signal.zWindows.Last(10)
-	}
-	openPrice := e.market.openPrice
-	latestPrice := e.signal.latestPrice.Load()
-	obs.Features["openPrice"] = openPrice
-	obs.Features["latestPrice"] = latestPrice
-	obs.Features["endTime"] = e.market.endTime
-	obs.Features["diffPrice"] = latestPrice - openPrice
-
-	if len(e.market.tokenIDs) > 0 {
-		if ob := e.GetOrderBook(e.market.tokenIDs[0]); ob == nil {
-			obs.Features["imBalance"] = float64(0)
-		} else {
-			obs.Features["imBalance"] = indicators.CalcImBalance(ob, 3)
-		}
-	}
-}
-
-func (e *Engine) resetForNewMarket(obj gjson.Result) (runtime.Observation, bool) {
-	e.signal.latestZ.Store(0)
-	e.token.items = make(map[string]runtime.Token, 2)
-	e.book.mu.Lock()
-	e.book.books = make(map[string]*atomic.Value)
-	e.book.mu.Unlock()
-
-	t, err := utils.ToTimestamp(obj.Get("endDate").String())
-	if err != nil {
-		e.market.endTime = 0
-	} else {
-		e.market.endTime = t
-	}
-	e.market.tokenIDs = utils.GetStringArray(&obj, "clobTokenIds")
-	if len(e.market.tokenIDs) < 2 {
-		return runtime.Observation{}, false
-	}
-
-	client := sdk.NewClient(sdk.DefaultConfig())
-	cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, "btc")
-	obs, err := client.GetOrderBooks([]sdk.BookParams{{TokenId: e.market.tokenIDs[0]}, {TokenId: e.market.tokenIDs[1]}})
-	if err != nil {
-		return runtime.Observation{}, false
-	}
-
-	e.market.openPrice = cpm.FetchOpenPrice(&obj)
-	if e.market.openPrice == 0 {
-		return runtime.Observation{}, false
-	}
-
-	e.market.raw = &obj
-	for _, o := range obs {
-		ap, bp := 0.0, 0.0
-		if len(o.Asks) > 0 {
-			ap = o.Asks[len(o.Asks)-1].Price
-		}
-		if len(o.Bids) > 0 {
-			bp = o.Bids[len(o.Bids)-1].Price
-		}
-		e.token.items[o.AssetId] = runtime.Token{
-			Id:       o.AssetId,
-			AskPrice: ap,
-			BidPrice: bp,
-		}
-		e.updateOrderBook(o.AssetId, func(old *sdk.OrderBook) *sdk.OrderBook {
-			return &sdk.OrderBook{
-				AssetId:   o.AssetId,
-				Market:    o.Market,
-				Timestamp: o.Timestamp,
-				Asks:      append([]orders.Book(nil), o.Asks...),
-				Bids:      append([]orders.Book(nil), o.Bids...),
-			}
-		})
-	}
-
-	if e.signal.zWindows != nil {
-		e.signal.zWindows.Reset()
-	}
-
-	conditionID := obj.Get("conditionId").String()
-	observation := runtime.Observation{
-		At:          time.Now().Unix(),
-		MarketID:    conditionID,
-		Tokens:      CopyMap(e.token.items),
-		TokenIds:    make([]string, len(e.market.tokenIDs)),
-		TimeLeftSec: e.market.endTime/1000 - time.Now().Unix(),
-	}
-	copy(observation.TokenIds, e.market.tokenIDs)
-	return observation, true
-}
-
-/**
-* 不要在任何地方修改返回的数据(高风险,这样做是为了高性能)
-**/
-func (e *Engine) GetOrderBook(tokenId string) *sdk.OrderBook {
-	e.book.mu.RLock()
-	v, exists := e.book.books[tokenId]
-	e.book.mu.RUnlock()
-
-	if !exists || v == nil {
-		return nil
-	}
-
-	ob, _ := v.Load().(*sdk.OrderBook)
-	if ob == nil {
-		return nil
-	}
-	// check stale
-	if ob.Latency > 500 {
-		log.Warn().Str("market", ob.Market).Int64("timestamp", ob.Timestamp).Int64("latency", ob.Latency).Msg("orderbook latency")
-		return nil
-	}
-	return ob
-}
-
-func (e *Engine) getBook(tokenId string) *atomic.Value {
-	e.book.mu.RLock()
-	v, ok := e.book.books[tokenId]
-	e.book.mu.RUnlock()
-
-	if ok {
-		return v
-	}
-
-	e.book.mu.Lock()
-	defer e.book.mu.Unlock()
-
-	if v, ok = e.book.books[tokenId]; ok {
-		return v
-	}
-
-	v = &atomic.Value{}
-	v.Store((*sdk.OrderBook)(nil))
-	e.book.books[tokenId] = v
-	return v
-}
-
-func (e *Engine) updateOrderBook(tokenId string, fn func(old *sdk.OrderBook) *sdk.OrderBook) {
-	v := e.getBook(tokenId)
-	old, _ := v.Load().(*sdk.OrderBook)
-	newOB := fn(old)
-	v.Store(newOB)
-}
-
-func CopyOrderBook(src sdk.OrderBook) sdk.OrderBook {
-	dst := src
-
-	if src.Bids != nil {
-		dst.Bids = make([]orders.Book, len(src.Bids))
-		copy(dst.Bids, src.Bids)
-	}
-
-	if src.Asks != nil {
-		dst.Asks = make([]orders.Book, len(src.Asks))
-		copy(dst.Asks, src.Asks)
-	}
-
-	return dst
-}
-
-func Phi(z float64) float64 {
-	return 0.5 * (1.0 + math.Erf(z/math.Sqrt2))
 }

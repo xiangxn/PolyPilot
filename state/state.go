@@ -3,14 +3,13 @@ package state
 import (
 	"errors"
 	appconfig "github.com/xiangxn/polypilot/config"
+	"github.com/xiangxn/polypilot/core"
 	"maps"
 	"strings"
 	"time"
 
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 )
-
-const floatEpsilon = 1e-9
 
 func NewState(cfg appconfig.Config, restoreClient ExchangeStateClient) (*State, error) {
 	balanceSync, err := BuildMulticallBalanceSyncConfig(cfg)
@@ -32,6 +31,7 @@ func NewStateWithBalanceSync(balanceSync BalanceSyncConfig, restoreClient Exchan
 		provisionalReservations: make(map[string]ProvisionalReservation),
 		balanceSync:             normalizeBalanceSyncConfig(balanceSync),
 		restoreClient:           restoreClient,
+		reconcileTrigger:        make(chan struct{}, 1),
 	}
 }
 
@@ -40,11 +40,12 @@ func (s *State) Snapshot() Snapshot {
 	defer s.mu.RUnlock()
 
 	return Snapshot{
-		Position: Position{
-			Tokens: cloneTokenPositions(s.position.Tokens),
-		},
-		Balance: s.balance,
-		Orders:  cloneOrderReservations(s.orderReservations),
+		Position:       Position{Tokens: cloneTokenPositions(s.position.Tokens)},
+		Balance:        s.balance,
+		Orders:         cloneOrderReservations(s.orderReservations),
+		DailyPnL:       s.dailyPnL,
+		DailyPnLDate:   s.dailyPnLDate,
+		OpenOrderCount: len(s.orderReservations),
 	}
 }
 
@@ -114,7 +115,7 @@ func (s *State) TryReserveProvisional(intentID, marketID, tokenID string, side o
 		ttl = 5 * time.Second
 	}
 
-	reservedAmount := requiredCollateral(side, price, requestedSize)
+	reservedAmount := core.RequiredCollateral(side, price, requestedSize)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -125,7 +126,7 @@ func (s *State) TryReserveProvisional(intentID, marketID, tokenID string, side o
 
 	s.ensureTokenPositions()
 	if side == orders.BUY {
-		if s.balance.Available+floatEpsilon < reservedAmount {
+		if s.balance.Available+core.FloatEpsilon < reservedAmount {
 			return errors.New("insufficient available balance for provisional reserve")
 		}
 		s.balance.Available -= reservedAmount
@@ -133,7 +134,7 @@ func (s *State) TryReserveProvisional(intentID, marketID, tokenID string, side o
 	} else {
 		k := tokenKey(tokenID)
 		tp := s.position.Tokens[k]
-		if tp.Available+floatEpsilon < requestedSize {
+		if tp.Available+core.FloatEpsilon < requestedSize {
 			return errors.New("insufficient token position for provisional sell reserve")
 		}
 		tp.Available -= requestedSize
@@ -253,145 +254,7 @@ func (s *State) CleanupExpiredProvisional(now time.Time) []string {
 }
 
 func (s *State) ReserveOrder(orderID, marketID, tokenID string, side orders.Side, price, requestedSize float64) error {
-	if orderID == "" {
-		return errors.New("empty order id")
-	}
-	if marketID == "" {
-		return errors.New("empty market id")
-	}
-	if tokenID == "" {
-		return errors.New("empty token id")
-	}
-	if requestedSize <= 0 {
-		return errors.New("invalid requested size")
-	}
-	if price <= 0 || price >= 1 {
-		return errors.New("invalid price")
-	}
-	if side != orders.BUY && side != orders.SELL {
-		return errors.New("invalid side")
-	}
-
-	reservedAmount := requiredCollateral(side, price, requestedSize)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.orderReservations[orderID]; exists {
-		return errors.New("order already reserved")
-	}
-
-	s.ensureTokenPositions()
-	if side == orders.BUY {
-		if s.balance.Available+floatEpsilon < reservedAmount {
-			return errors.New("insufficient available balance for reserve")
-		}
-		s.balance.Available -= reservedAmount
-		s.balance.Reserved += reservedAmount
-	} else {
-		k := tokenKey(tokenID)
-		tp := s.position.Tokens[k]
-		if tp.Available+floatEpsilon < requestedSize {
-			return errors.New("insufficient token position for sell reserve")
-		}
-		tp.Available -= requestedSize
-		tp.Reserved += requestedSize
-		if tp.Available < 0 {
-			tp.Available = 0
-		}
-		s.position.Tokens[k] = tp
-	}
-
-	s.orderReservations[orderID] = OrderReservation{
-		OrderID:       orderID,
-		MarketID:      marketID,
-		TokenID:       tokenID,
-		Side:          side,
-		Price:         price,
-		RemainingSize: requestedSize,
-		Reserved:      reservedAmount,
-	}
-
-	return nil
-}
-
-func (s *State) ApplyFill(orderID, marketID, tokenID string, side orders.Side, filledSize, fillPrice float64) error {
-	if orderID == "" {
-		return errors.New("empty order id")
-	}
-	if filledSize <= 0 {
-		return errors.New("invalid filled size")
-	}
-	if side != orders.BUY && side != orders.SELL {
-		return errors.New("invalid side")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	res, exists := s.orderReservations[orderID]
-	if !exists {
-		return errors.New("reservation not found")
-	}
-	if res.MarketID != marketID || res.TokenID != tokenID {
-		return errors.New("fill market/token mismatch")
-	}
-	if res.Side != side {
-		return errors.New("fill side mismatch")
-	}
-	if filledSize > res.RemainingSize+floatEpsilon {
-		return errors.New("filled size exceeds remaining size")
-	}
-	if fillPrice <= 0 { // 需要实测是否需要回退使用res.Price
-		fillPrice = res.Price
-	}
-
-	consumed := requiredCollateral(side, fillPrice, filledSize)
-	if consumed > res.Reserved {
-		consumed = res.Reserved
-	}
-
-	res.RemainingSize -= filledSize
-	if res.RemainingSize < 0 {
-		res.RemainingSize = 0
-	}
-	res.Reserved -= consumed
-	if res.Reserved < 0 {
-		res.Reserved = 0
-	}
-
-	s.ensureTokenPositions()
-	switch side {
-	case orders.BUY:
-		s.balance.Reserved -= consumed
-		if s.balance.Reserved < 0 {
-			s.balance.Reserved = 0
-		}
-
-		k := tokenKey(res.TokenID)
-		tp := s.position.Tokens[k]
-		tp.Available += filledSize
-		s.position.Tokens[k] = tp
-	case orders.SELL:
-		k := tokenKey(res.TokenID)
-		tp := s.position.Tokens[k]
-		tp.Reserved -= consumed
-		if tp.Reserved < 0 {
-			tp.Reserved = 0
-		}
-		s.position.Tokens[k] = tp
-
-		proceeds := fillPrice * filledSize
-		s.balance.Available += proceeds
-	}
-
-	if res.RemainingSize <= floatEpsilon {
-		delete(s.orderReservations, orderID)
-	} else {
-		s.orderReservations[orderID] = res
-	}
-
-	return nil
+	return s.AttachOrder("", orderID, marketID, tokenID, side, price, requestedSize)
 }
 
 func (s *State) ReleaseOrder(orderID string) {
@@ -495,17 +358,6 @@ func (s *State) ReconcileOnchainBalance(onchainTotal float64, epsilon float64) (
 
 	s.balance.Available = newAvailable
 	return true, drift
-}
-
-func requiredCollateral(side orders.Side, price, size float64) float64 {
-	switch side {
-	case orders.BUY:
-		return size * price
-	case orders.SELL:
-		return size
-	default:
-		return 0
-	}
 }
 
 func tokenKey(tokenID string) string {

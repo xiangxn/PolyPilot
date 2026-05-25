@@ -3,8 +3,6 @@ package execution
 import (
 	"context"
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,9 +11,6 @@ import (
 	"github.com/xiangxn/polypilot/logx"
 	"github.com/xiangxn/polypilot/runtime"
 
-	"github.com/tidwall/gjson"
-	"github.com/xiangxn/go-polymarket-sdk/constants"
-	"github.com/xiangxn/go-polymarket-sdk/model"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	"github.com/xiangxn/go-polymarket-sdk/relayer"
@@ -53,6 +48,14 @@ type Executor struct {
 	Config       *sdk.Config
 	OrderType    orders.OrderType
 	DeferExec    bool
+	DryRun       bool // when true, all placements publish Accepted+Filled without hitting Polymarket
+
+	// Reconcile is invoked when the executor sees a trade event for an
+	// orderID it doesn't track (i.e., a manually-placed external order on
+	// Polymarket). State will be reconciled in response.
+	Reconcile func()
+
+	relayClient *relayer.RelayClient // cached at Init
 
 	ExecutionQueueSize int
 
@@ -88,6 +91,10 @@ func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
 		if e.Client == nil {
 			e.Client = sdk.NewClient(cfg)
 		}
+		if e.relayClient == nil && cfg != nil {
+			p := cfg.Polymarket
+			e.relayClient = relayer.NewRelayClient(p.RelayerBaseURL, p.OwnerKey, p.ChainID, p.BuilderCreds, nil, p.RelayerKey)
+		}
 		if e.TradeMonitor == nil && cfg != nil {
 			e.TradeMonitor = sdk.NewTradeMonitor(cfg.Polymarket.ClobWSBaseURL, cfg.Polymarket.CLOBCreds)
 		}
@@ -105,7 +112,44 @@ func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
 }
 
 func (e *Executor) Execute(intents []runtime.OrderIntent) {
-	if len(intents) == 0 || e.Client == nil {
+	if len(intents) == 0 {
+		return
+	}
+	if !e.DryRun && e.Client == nil {
+		return
+	}
+
+	if e.DryRun {
+		now := time.Now()
+		for _, in := range intents {
+			if in.Action == runtime.OrderIntentActionCancel {
+				continue // dry-run cancel is a no-op
+			}
+			orderID := fmt.Sprintf("dryrun-%d-%s", time.Now().UnixNano(), in.TokenID)
+			e.publish(core.ExecutionEvent{
+				ParentOrderID: in.IntentID,
+				OrderID:       orderID,
+				MarketID:      in.MarketID,
+				TokenID:       in.TokenID,
+				Price:         in.Price,
+				Side:          in.Side,
+				RequestedSize: in.Size,
+				Status:        core.ExecutionStatusAccepted,
+				At:            now,
+			})
+			e.publish(core.ExecutionEvent{
+				ParentOrderID: in.IntentID,
+				OrderID:       orderID,
+				MarketID:      in.MarketID,
+				TokenID:       in.TokenID,
+				Price:         in.Price,
+				Side:          in.Side,
+				RequestedSize: in.Size,
+				FilledSize:    in.Size,
+				Status:        core.ExecutionStatusFilled,
+				At:            now,
+			})
+		}
 		return
 	}
 
@@ -184,6 +228,8 @@ func (e *Executor) consumeExecuteQueue(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// drain remaining batches and reject them so callers see the shutdown.
+			e.drainQueueOnShutdown()
 			return
 		case batch := <-e.queue:
 			if len(batch) == 0 {
@@ -210,164 +256,20 @@ func (e *Executor) consumeExecuteQueue(ctx context.Context) {
 	}
 }
 
-func (e *Executor) submitSplits(intents []runtime.OrderIntent) {
-	if len(intents) == 0 {
+// drainQueueOnShutdown rejects every remaining batch in the queue with a
+// "shutting down" reason. Non-blocking — returns as soon as the queue is
+// empty. Extracted from consumeExecuteQueue so it can be unit-tested
+// without spinning up the worker goroutine.
+func (e *Executor) drainQueueOnShutdown() {
+	if e.queue == nil {
 		return
 	}
-	pcfg := e.Config.Polymarket
-	relayerClient := relayer.NewRelayClient(pcfg.RelayerBaseURL, pcfg.OwnerKey, pcfg.ChainID, pcfg.BuilderCreds, nil, pcfg.RelayerKey)
-	for _, intent := range intents {
-		size := math.Trunc(intent.Size*1e6) / 1e6
-		tlen := 2
-		orderTmps := make([]string, 0, tlen)
-		newIntents := make([]runtime.OrderIntent, 0, tlen)
-		for _, t := range intent.Tokens {
-			newIntent := runtime.OrderIntent{
-				Action:   runtime.OrderIntentActionPlace,
-				MarketID: intent.MarketID,
-				TokenID:  t,
-				Price:    0.5,
-				Side:     orders.BUY,
-				Size:     size,
-			}
-			orderId := fmt.Sprintf("%d_%s", time.Now().UnixNano(), t)
-			orderTmps = append(orderTmps, orderId)
-			newIntents = append(newIntents, newIntent)
-			e.trackPostedOrder(orderId, newIntent)
-			e.publishAcceptedFromPost(newIntent, orderId, time.Now())
-		}
-		result, err := relayerClient.SplitTokens(intent.MarketID, strconv.FormatFloat(size, 'f', constants.CollateralTokenDecimals, 64), false)
-		if err != nil {
-			log.Error().AnErr("err", err).Msg("split token failed")
-			for i, o := range orderTmps {
-				in := newIntents[i]
-				e.publish(core.ExecutionEvent{
-					OrderID:       o,
-					MarketID:      in.MarketID,
-					TokenID:       in.TokenID,
-					Price:         in.Price,
-					Side:          in.Side,
-					RequestedSize: in.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        fmt.Sprintf("split token failed: %v", err),
-					At:            time.Now(),
-				})
-			}
-			continue
-		}
-		log.Info().Str("State", result.State).Str("Hash", result.Hash).Msg("submitSplits result")
-		if result.State == "STATE_NEW" {
-			for i, o := range orderTmps {
-				in := newIntents[i]
-				e.publish(core.ExecutionEvent{
-					OrderID:       o,
-					MarketID:      in.MarketID,
-					TokenID:       in.TokenID,
-					Price:         in.Price,
-					Side:          in.Side,
-					RequestedSize: in.Size,
-					FilledSize:    in.Size,
-					Status:        core.ExecutionStatusFilled,
-					At:            time.Now(),
-				})
-			}
-		} else {
-			for i, o := range orderTmps {
-				in := newIntents[i]
-				e.publish(core.ExecutionEvent{
-					OrderID:       o,
-					MarketID:      in.MarketID,
-					TokenID:       in.TokenID,
-					Price:         in.Price,
-					Side:          in.Side,
-					RequestedSize: in.Size,
-					FilledSize:    in.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        fmt.Sprintf("split token failed: %s", result.State),
-					At:            time.Now(),
-				})
-			}
-		}
-	}
-}
-
-func (e *Executor) submitMerges(intents []runtime.OrderIntent) {
-	if len(intents) == 0 {
-		return
-	}
-	pcfg := e.Config.Polymarket
-	relayerClient := relayer.NewRelayClient(pcfg.RelayerBaseURL, pcfg.OwnerKey, pcfg.ChainID, pcfg.BuilderCreds, nil, pcfg.RelayerKey)
-	for _, intent := range intents {
-		size := math.Trunc(intent.Size*1e6) / 1e6
-		tlen := 2
-		orderTmps := make([]string, 0, tlen)
-		newIntents := make([]runtime.OrderIntent, 0, tlen)
-		for _, t := range intent.Tokens {
-			newIntent := runtime.OrderIntent{
-				Action:   runtime.OrderIntentActionPlace,
-				MarketID: intent.MarketID,
-				TokenID:  t,
-				Price:    0.5,
-				Side:     orders.SELL,
-				Size:     size,
-			}
-			orderId := fmt.Sprintf("%d_%s", time.Now().UnixNano(), t)
-			orderTmps = append(orderTmps, orderId)
-			newIntents = append(newIntents, newIntent)
-			e.trackPostedOrder(orderId, newIntent)
-			e.publishAcceptedFromPost(newIntent, orderId, time.Now())
-		}
-		result, err := relayerClient.MergeTokens(intent.MarketID, strconv.FormatFloat(size, 'f', constants.CollateralTokenDecimals, 64), false)
-		if err != nil {
-			log.Error().AnErr("err", err).Msg("merge token failed")
-			for i, o := range orderTmps {
-				in := newIntents[i]
-				e.publish(core.ExecutionEvent{
-					OrderID:       o,
-					MarketID:      in.MarketID,
-					TokenID:       in.TokenID,
-					Price:         in.Price,
-					Side:          in.Side,
-					RequestedSize: in.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        fmt.Sprintf("merge token failed: %v", err),
-					At:            time.Now(),
-				})
-			}
-			continue
-		}
-		log.Info().Str("State", result.State).Str("Hash", result.Hash).Msg("submitMerges result")
-		if result.State == "STATE_NEW" {
-			for i, o := range orderTmps {
-				in := newIntents[i]
-				e.publish(core.ExecutionEvent{
-					OrderID:       o,
-					MarketID:      in.MarketID,
-					TokenID:       in.TokenID,
-					Price:         in.Price,
-					Side:          in.Side,
-					RequestedSize: in.Size,
-					FilledSize:    in.Size,
-					Status:        core.ExecutionStatusFilled,
-					At:            time.Now(),
-				})
-			}
-		} else {
-			for i, o := range orderTmps {
-				in := newIntents[i]
-				e.publish(core.ExecutionEvent{
-					OrderID:       o,
-					MarketID:      in.MarketID,
-					TokenID:       in.TokenID,
-					Price:         in.Price,
-					Side:          in.Side,
-					RequestedSize: in.Size,
-					FilledSize:    in.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        fmt.Sprintf("merge token failed: %s", result.State),
-					At:            time.Now(),
-				})
-			}
+	for {
+		select {
+		case batch := <-e.queue:
+			e.rejectBatch(batch, "shutting down")
+		default:
+			return
 		}
 	}
 }
@@ -391,500 +293,6 @@ func (e *Executor) rejectBatch(intents []runtime.OrderIntent, reason string) {
 		}
 		e.publish(ev)
 	}
-}
-
-func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
-	if len(intents) == 0 {
-		return
-	}
-
-	preparedOrders := make([]preparedPlacement, 0, len(intents))
-	signatureType := orders.POLY_GNOSIS_SAFE
-	for _, in := range intents {
-		signedOrder, err := e.Client.CreateOrder(&orders.UserOrder{
-			TokenID: in.TokenID,
-			Price:   in.Price,
-			Size:    in.Size,
-			Side:    in.Side,
-		}, orders.CreateOrderOptions{SignatureType: &signatureType})
-		if err != nil {
-			e.publish(core.ExecutionEvent{
-				ParentOrderID: in.IntentID,
-				MarketID:      in.MarketID,
-				TokenID:       in.TokenID,
-				Price:         in.Price,
-				Side:          in.Side,
-				RequestedSize: in.Size,
-				Status:        core.ExecutionStatusRejected,
-				Reason:        fmt.Sprintf("create order failed: %v", err),
-				At:            time.Now(),
-			})
-			continue
-		}
-		preparedOrders = append(preparedOrders, preparedPlacement{intent: in, order: signedOrder})
-	}
-
-	if len(preparedOrders) == 0 {
-		return
-	}
-
-	if len(preparedOrders) > 1 {
-		args := make([]orders.PostOrdersArgs, 0, len(preparedOrders))
-		for _, po := range preparedOrders {
-			args = append(args, orders.PostOrdersArgs{Order: po.order, OrderType: e.OrderType})
-		}
-
-		startAt := time.Now().UnixMilli()
-		results, err := e.Client.PostOrders(args, e.DeferExec)
-		log.Debug().Int64("submit_start_ms", startAt).Int64("submit_end_ms", time.Now().UnixMilli()).Msg("post orders batch finished")
-		if err != nil {
-			now := time.Now()
-			for _, po := range preparedOrders {
-				e.publish(core.ExecutionEvent{
-					ParentOrderID: po.intent.IntentID,
-					MarketID:      po.intent.MarketID,
-					TokenID:       po.intent.TokenID,
-					Price:         po.intent.Price,
-					Side:          po.intent.Side,
-					RequestedSize: po.intent.Size,
-					Status:        core.ExecutionStatusRejected,
-					Reason:        fmt.Sprintf("post orders failed: %v", err),
-					At:            now,
-				})
-			}
-			return
-		}
-
-		e.handlePostOrdersResults(preparedOrders, results.Array())
-		return
-	}
-
-	single := preparedOrders[0]
-	startAt := time.Now().UnixMilli()
-	result, err := e.Client.PostOrder(single.order, e.OrderType, e.DeferExec)
-	log.Debug().Int64("submit_start_ms", startAt).Int64("submit_end_ms", time.Now().UnixMilli()).Msg("post order finished")
-	if err != nil {
-		e.publish(core.ExecutionEvent{
-			ParentOrderID: single.intent.IntentID,
-			MarketID:      single.intent.MarketID,
-			TokenID:       single.intent.TokenID,
-			Price:         single.intent.Price,
-			Side:          single.intent.Side,
-			RequestedSize: single.intent.Size,
-			Status:        core.ExecutionStatusRejected,
-			Reason:        fmt.Sprintf("post order failed: %v", err),
-			At:            time.Now(),
-		})
-		return
-	}
-
-	errorMsg := result.Get("errorMsg").String()
-	if errorMsg != "" {
-		e.publish(core.ExecutionEvent{
-			ParentOrderID: single.intent.IntentID,
-			MarketID:      single.intent.MarketID,
-			TokenID:       single.intent.TokenID,
-			Price:         single.intent.Price,
-			Side:          single.intent.Side,
-			RequestedSize: single.intent.Size,
-			Status:        core.ExecutionStatusRejected,
-			Reason:        fmt.Sprintf("post order failed: %s", errorMsg),
-			At:            time.Now(),
-		})
-		return
-	}
-	orderID := strings.TrimSpace(result.Get("orderID").String())
-	if orderID == "" {
-		e.publish(core.ExecutionEvent{
-			ParentOrderID: single.intent.IntentID,
-			MarketID:      single.intent.MarketID,
-			TokenID:       single.intent.TokenID,
-			Price:         single.intent.Price,
-			Side:          single.intent.Side,
-			RequestedSize: single.intent.Size,
-			Status:        core.ExecutionStatusRejected,
-			Reason:        "post order failed: empty order id",
-			At:            time.Now(),
-		})
-		return
-	}
-	e.trackPostedOrder(orderID, single.intent)
-	e.publishAcceptedFromPost(single.intent, orderID, time.Now())
-}
-
-func (e *Executor) handlePostOrdersResults(preparedOrders []preparedPlacement, results []gjson.Result) {
-	for i, po := range preparedOrders {
-		if i >= len(results) {
-			e.publish(core.ExecutionEvent{
-				ParentOrderID: po.intent.IntentID,
-				MarketID:      po.intent.MarketID,
-				TokenID:       po.intent.TokenID,
-				Price:         po.intent.Price,
-				Side:          po.intent.Side,
-				RequestedSize: po.intent.Size,
-				Status:        core.ExecutionStatusRejected,
-				Reason:        "post orders failed: missing result item",
-				At:            time.Now(),
-			})
-			continue
-		}
-		result := results[i]
-		errorMsg := result.Get("errorMsg").String()
-		if errorMsg != "" {
-			e.publish(core.ExecutionEvent{
-				ParentOrderID: po.intent.IntentID,
-				MarketID:      po.intent.MarketID,
-				TokenID:       po.intent.TokenID,
-				Price:         po.intent.Price,
-				Side:          po.intent.Side,
-				RequestedSize: po.intent.Size,
-				Status:        core.ExecutionStatusRejected,
-				Reason:        fmt.Sprintf("post orders failed: %s", errorMsg),
-				At:            time.Now(),
-			})
-			continue
-		}
-		orderID := strings.TrimSpace(result.Get("orderID").String())
-		if orderID == "" {
-			e.publish(core.ExecutionEvent{
-				ParentOrderID: po.intent.IntentID,
-				MarketID:      po.intent.MarketID,
-				TokenID:       po.intent.TokenID,
-				Price:         po.intent.Price,
-				Side:          po.intent.Side,
-				RequestedSize: po.intent.Size,
-				Status:        core.ExecutionStatusRejected,
-				Reason:        "post orders failed: empty order id",
-				At:            time.Now(),
-			})
-			continue
-		}
-		e.trackPostedOrder(orderID, po.intent)
-		e.publishAcceptedFromPost(po.intent, orderID, time.Now())
-	}
-}
-
-func (e *Executor) trackPostedOrder(orderID string, in runtime.OrderIntent) {
-	if strings.TrimSpace(orderID) == "" {
-		return
-	}
-	e.mu.Lock()
-	t := e.getOrCreateTracked(orderID)
-	t.MarketID = firstNonEmpty(in.MarketID, t.MarketID)
-	t.TokenID = firstNonEmpty(in.TokenID, t.TokenID)
-	t.Side = in.Side
-	if in.Price > 0 {
-		t.Price = in.Price
-	}
-	if in.Size > 0 {
-		t.RequestedSize = in.Size
-	}
-	t.Accepted = true
-	e.mu.Unlock()
-}
-
-func (e *Executor) publishAcceptedFromPost(in runtime.OrderIntent, orderID string, at time.Time) {
-	e.publish(core.ExecutionEvent{
-		ParentOrderID: in.IntentID,
-		OrderID:       orderID,
-		MarketID:      in.MarketID,
-		TokenID:       in.TokenID,
-		Price:         in.Price,
-		Side:          in.Side,
-		RequestedSize: in.Size,
-		FilledSize:    0,
-		Status:        core.ExecutionStatusAccepted,
-		At:            at,
-	})
-}
-
-func (e *Executor) submitCancels(intents []runtime.OrderIntent) {
-	if len(intents) == 0 {
-		return
-	}
-
-	if len(intents) > 1 {
-		ids := make([]string, 0, len(intents))
-		for _, in := range intents {
-			ids = append(ids, in.OrderID)
-		}
-		if _, err := e.Client.CancelOrders(ids); err != nil {
-			for _, in := range intents {
-				e.publish(core.ExecutionEvent{
-					Status: core.ExecutionStatusRejected,
-					Reason: fmt.Sprintf("cancel orders failed (order=%s): %v", in.OrderID, err),
-					At:     time.Now(),
-				})
-			}
-		}
-		return
-	}
-
-	in := intents[0]
-	if _, err := e.Client.CancelOrder(&orders.OrderPayload{OrderID: in.OrderID}); err != nil {
-		e.publish(core.ExecutionEvent{
-			Status: core.ExecutionStatusRejected,
-			Reason: fmt.Sprintf("cancel order failed (order=%s): %v", in.OrderID, err),
-			At:     time.Now(),
-		})
-	}
-}
-
-func (e *Executor) consumeTradeEvents(ctx context.Context) {
-	if e.TradeMonitor == nil {
-		return
-	}
-	ch := e.TradeMonitor.SubscribeEvents()
-	for {
-		select {
-		case <-ctx.Done():
-			_ = e.TradeMonitor.Close()
-			return
-		case ev, ok := <-ch:
-			if !ok {
-				return
-			}
-			e.handleTradeEvent(ev)
-		}
-	}
-}
-
-func (e *Executor) handleTradeEvent(ev sdk.TradeEvent) {
-	if ev.ParseErr != nil {
-		log.Error().Err(ev.ParseErr).Msg("trade monitor parse error")
-		return
-	}
-
-	switch ev.EventType {
-	case sdk.TradeEventTypeOrder:
-		if ev.Order != nil {
-			e.onOrderEvent(ev.Order)
-		}
-	case sdk.TradeEventTypeTrade:
-		if ev.Trade != nil {
-			e.onTradeEvent(ev.Trade)
-		}
-	}
-}
-
-func (e *Executor) onOrderEvent(o *model.WSOrder) {
-	if o == nil || strings.TrimSpace(o.Id) == "" || !e.isOwnOwner(o.Owner) {
-		return
-	}
-
-	side := orders.Side(o.Side)
-	at := parseEventTime(o.Timestamp)
-	status := strings.ToUpper(strings.TrimSpace(o.Status))
-
-	var out []core.ExecutionEvent
-	e.mu.Lock()
-	t := e.getOrCreateTracked(o.Id)
-	t.MarketID = firstNonEmpty(o.Market, t.MarketID)
-	t.TokenID = firstNonEmpty(o.AssetId, t.TokenID)
-	t.Side = side
-	if o.Price > 0 {
-		t.Price = o.Price
-	}
-	if o.OriginalSize > 0 {
-		t.RequestedSize = o.OriginalSize
-	}
-
-	switch status {
-	case "LIVE":
-		if ev, ok := e.buildAcceptedEvent(o.Id, t, at); ok {
-			out = append(out, ev)
-			t.Accepted = true
-		}
-	case "CANCELED", "CANCELED_MARKET_RESOLVED":
-		if !t.Finalized {
-			out = append(out, core.ExecutionEvent{
-				OrderID:       o.Id,
-				MarketID:      t.MarketID,
-				TokenID:       t.TokenID,
-				Price:         t.Price,
-				Side:          t.Side,
-				RequestedSize: t.RequestedSize,
-				FilledSize:    0,
-				Status:        core.ExecutionStatusCancelled,
-				At:            at,
-			})
-			t.Finalized = true
-		}
-	default:
-		log.Info().Any("WSOrder", *o).Msg("onOrderEvent default case")
-	}
-	e.mu.Unlock()
-
-	for _, item := range out {
-		e.publish(item)
-	}
-}
-
-func (e *Executor) onTradeEvent(ti *model.WSTrade) {
-	if ti == nil {
-		return
-	}
-	status := strings.ToUpper(strings.TrimSpace(ti.Status))
-	at := parseEventTime(ti.Timestamp)
-
-	type fill struct {
-		orderID string
-		market  string
-		tokenID string
-		side    orders.Side
-		price   float64
-		size    float64
-	}
-
-	fills := make([]fill, 0, 1+len(ti.MakerOrders))
-	if strings.TrimSpace(ti.TakerOrderId) != "" && e.isOwnOwner(ti.Owner) {
-		fills = append(fills, fill{
-			orderID: ti.TakerOrderId,
-			market:  ti.Market,
-			tokenID: ti.AssetId,
-			side:    orders.Side(ti.Side),
-			price:   ti.Price,
-			size:    ti.Size,
-		})
-	}
-	for _, mo := range ti.MakerOrders {
-		side := orders.Side(mo.Side)
-		if strings.TrimSpace(mo.OrderId) == "" || !e.isOwnOwner(mo.Owner) {
-			continue
-		}
-		fills = append(fills, fill{
-			orderID: mo.OrderId,
-			market:  ti.Market,
-			tokenID: mo.AssetId,
-			side:    side,
-			price:   mo.Price,
-			size:    mo.MatchedAmount,
-		})
-	}
-
-	var out []core.ExecutionEvent
-	e.mu.Lock()
-	for _, f := range fills {
-		tracked := e.getOrCreateTracked(f.orderID)
-		if tracked.Finalized {
-			continue
-		}
-		tracked.MarketID = firstNonEmpty(f.market, tracked.MarketID)
-		tracked.TokenID = firstNonEmpty(f.tokenID, tracked.TokenID)
-		tracked.Side = f.side
-		if f.price > 0 {
-			tracked.Price = f.price
-		}
-
-		switch status {
-		case "MINED":
-			if ti.Id != "" {
-				if tracked.SeenTradeIDs == nil {
-					tracked.SeenTradeIDs = make(map[string]struct{})
-				}
-				if _, exists := tracked.SeenTradeIDs[ti.Id]; exists {
-					continue
-				}
-				tracked.SeenTradeIDs[ti.Id] = struct{}{}
-			}
-			out = append(out, e.buildFillEventsFromDelta(f.orderID, tracked, f.size, at)...)
-		case "FAILED":
-			out = append(out, core.ExecutionEvent{
-				OrderID:       f.orderID,
-				MarketID:      tracked.MarketID,
-				TokenID:       tracked.TokenID,
-				Price:         tracked.Price,
-				Side:          tracked.Side,
-				RequestedSize: tracked.RequestedSize,
-				FilledSize:    0,
-				Status:        core.ExecutionStatusRejected,
-				Reason:        core.ExecutionReasonTradeFailed,
-				At:            at,
-			})
-			tracked.Finalized = true
-		}
-	}
-	e.mu.Unlock()
-
-	for _, item := range out {
-		e.publish(item)
-	}
-}
-
-func (e *Executor) buildAcceptedEvent(orderID string, t *trackedOrder, at time.Time) (core.ExecutionEvent, bool) {
-	if t == nil || t.Accepted || t.MarketID == "" || t.TokenID == "" || t.Price <= 0 || t.RequestedSize <= 0 {
-		return core.ExecutionEvent{}, false
-	}
-	if t.Side != orders.BUY && t.Side != orders.SELL {
-		return core.ExecutionEvent{}, false
-	}
-	return core.ExecutionEvent{
-		OrderID:       orderID,
-		MarketID:      t.MarketID,
-		TokenID:       t.TokenID,
-		Price:         t.Price,
-		Side:          t.Side,
-		RequestedSize: t.RequestedSize,
-		FilledSize:    0,
-		Status:        core.ExecutionStatusAccepted,
-		At:            at,
-	}, true
-}
-
-func (e *Executor) buildFillEventsFromCumulative(orderID string, t *trackedOrder, cumulative float64, at time.Time) []core.ExecutionEvent {
-	if t == nil {
-		return nil
-	}
-	if cumulative < 0 {
-		cumulative = 0
-	}
-	if t.RequestedSize > 0 && cumulative > t.RequestedSize {
-		cumulative = t.RequestedSize
-	}
-	delta := cumulative - t.FilledSize
-	if delta <= floatEpsilon {
-		return nil
-	}
-	t.FilledSize = cumulative
-
-	status := core.ExecutionStatusPartiallyFilled
-	if t.RequestedSize > 0 && t.FilledSize+floatEpsilon >= t.RequestedSize {
-		status = core.ExecutionStatusFilled
-		t.Finalized = true
-	}
-
-	return []core.ExecutionEvent{{
-		OrderID:       orderID,
-		MarketID:      t.MarketID,
-		TokenID:       t.TokenID,
-		Price:         t.Price,
-		Side:          t.Side,
-		RequestedSize: t.RequestedSize,
-		FilledSize:    delta,
-		Status:        status,
-		At:            at,
-	}}
-}
-
-func (e *Executor) buildFillEventsFromDelta(orderID string, t *trackedOrder, delta float64, at time.Time) []core.ExecutionEvent {
-	if t == nil || delta <= floatEpsilon {
-		return nil
-	}
-	cumulative := t.FilledSize + delta
-	return e.buildFillEventsFromCumulative(orderID, t, cumulative, at)
-}
-
-func (e *Executor) getOrCreateTracked(orderID string) *trackedOrder {
-	if e.tracked == nil {
-		e.tracked = make(map[string]*trackedOrder)
-	}
-	t, ok := e.tracked[orderID]
-	if ok {
-		return t
-	}
-	t = &trackedOrder{SeenTradeIDs: make(map[string]struct{})}
-	e.tracked[orderID] = t
-	return t
 }
 
 func (e *Executor) publish(data core.ExecutionEvent) {

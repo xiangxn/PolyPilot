@@ -17,13 +17,15 @@ type PolymarketStateClient struct {
 	Client         *sdk.PolymarketClient
 	PositionLimits int
 	SDKConfig      *sdk.PolymarketConfig
+	RedeemEnabled  bool
 }
 
-func NewPolymarketStateClient(client *sdk.PolymarketClient, config *sdk.PolymarketConfig, positionLimits int) *PolymarketStateClient {
+func NewPolymarketStateClient(client *sdk.PolymarketClient, config *sdk.PolymarketConfig, positionLimits int, redeemEnabled bool) *PolymarketStateClient {
 	return &PolymarketStateClient{
 		Client:         client,
 		PositionLimits: positionLimits,
 		SDKConfig:      config,
+		RedeemEnabled:  redeemEnabled,
 	}
 }
 
@@ -45,6 +47,10 @@ func (p *PolymarketStateClient) GetPositions() (*gjson.Result, error) {
 }
 
 func (p *PolymarketStateClient) Redeem(ctx context.Context, onRedeemSuccess func(tokenIDs []string)) {
+	if p == nil || !p.RedeemEnabled {
+		log.Debug().Msg("redeem disabled by config")
+		return
+	}
 	go func() {
 		log.Info().Msg("redeem loop start")
 		defer log.Info().Msg("redeem loop exit")

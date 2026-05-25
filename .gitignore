@@ -4,3 +4,10 @@ data
 config.yaml
 *.config.yaml
 venv
+
+# Added by /init-pro
+.claude/
+CLAUDE.md
+AGENTS.md
+*.local.*
+.playwright-mcp/
