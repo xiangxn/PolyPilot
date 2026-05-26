@@ -9,6 +9,7 @@ import (
 	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	"github.com/xiangxn/go-polymarket-sdk/utils"
+	pUtils "github.com/xiangxn/polypilot/utils"
 )
 
 // resetPrep holds RPC-derived data needed to reset market state.
@@ -91,7 +92,7 @@ func (e *Engine) resetForNewMarketLocked(obj gjson.Result, prep *resetPrep) (run
 	obs := runtime.Observation{
 		At:          time.Now().Unix(),
 		MarketID:    obj.Get("conditionId").String(),
-		Tokens:      CopyMap(e.token.items),
+		Tokens:      pUtils.CopyMap(e.token.items),
 		TokenIds:    append([]string(nil), prep.tokenIDs...),
 		TimeLeftSec: prep.endTime/1000 - time.Now().Unix(),
 	}

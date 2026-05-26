@@ -10,6 +10,7 @@ import (
 	"github.com/xiangxn/polypilot/internal/atomicx"
 	"github.com/xiangxn/polypilot/internal/buffer"
 	"github.com/xiangxn/polypilot/runtime"
+	"github.com/xiangxn/polypilot/utils"
 
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
@@ -18,11 +19,11 @@ import (
 
 func TestCopyMap(t *testing.T) {
 	src := map[string]int{"a": 1, "b": 2}
-	dst := CopyMap(src)
+	dst := utils.CopyMap(src)
 	if dst["a"] != 1 || dst["b"] != 2 {
 		t.Fatalf("got %v", dst)
 	}
-	if CopyMap[string, int](nil) != nil {
+	if utils.CopyMap[string, int](nil) != nil {
 		t.Fatal("nil source → nil dst")
 	}
 	// Independence

@@ -2,7 +2,6 @@ package probability
 
 import (
 	"context"
-	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/xiangxn/polypilot/internal/buffer"
 	"github.com/xiangxn/polypilot/logx"
 	"github.com/xiangxn/polypilot/runtime"
+	"github.com/xiangxn/polypilot/utils"
 
 	"github.com/tidwall/gjson"
 	"github.com/xiangxn/go-polymarket-sdk/orders"
@@ -70,16 +70,6 @@ type bookState struct {
 // to sdk.NewClient(sdk.DefaultConfig()) at first use — useful for tests.
 func NewEngine(symbol string, client *sdk.PolymarketClient) *Engine {
 	return &Engine{Symbol: symbol, client: client}
-}
-
-func CopyMap[K comparable, V any](src map[K]V) map[K]V {
-	if src == nil {
-		return nil
-	}
-
-	dst := make(map[K]V, len(src))
-	maps.Copy(dst, src)
-	return dst
 }
 
 func (e *Engine) Init(ctx context.Context) {
@@ -179,7 +169,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			obs.MarketID = orderBook.Market
 			obs.TimeLeftSec = e.market.endTime/1000 - time.Now().Unix()
 			obs.Probability = e.signal.latestProb.Load()
-			obs.Tokens = CopyMap(e.token.items)
+			obs.Tokens = utils.CopyMap(e.token.items)
 			obs.TokenIds = make([]string, len(e.market.tokenIDs))
 			copy(obs.TokenIds, e.market.tokenIDs)
 			obs.GetOrderBook = func(tID string) *sdk.OrderBook {
@@ -234,7 +224,7 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 		MarketID:    e.market.raw.Get("conditionId").String(),
 		TimeLeftSec: e.market.endTime/1000 - time.Now().Unix(),
 		Probability: e.signal.latestProb.Load(),
-		Tokens:      CopyMap(e.token.items),
+		Tokens:      utils.CopyMap(e.token.items),
 		TokenIds:    make([]string, len(e.market.tokenIDs)),
 		GetOrderBook: func(tID string) *sdk.OrderBook {
 			return e.GetOrderBook(tID)
