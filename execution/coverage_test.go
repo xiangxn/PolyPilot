@@ -1881,12 +1881,13 @@ func TestConsumeExecuteQueue_RoutesAllActionTypes(t *testing.T) {
 	// Actually: placements=1 rejection, cancels=1 rejection, splits=2 accepted+2 rejected, merges=2 accepted+2 rejected = 10
 	count := 0
 	deadline := time.After(3 * time.Second)
+Loop:
 	for count < 10 {
 		select {
 		case <-ch:
 			count++
 		case <-deadline:
-			break
+			break Loop
 		}
 		if count == 10 {
 			break
