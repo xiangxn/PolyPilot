@@ -24,12 +24,13 @@ func (e *Executor) submitSplits(intents []runtime.OrderIntent) {
 		newIntents := make([]runtime.OrderIntent, 0, tlen)
 		for _, t := range intent.Tokens {
 			newIntent := runtime.OrderIntent{
-				Action:   runtime.OrderIntentActionPlace,
-				MarketID: intent.MarketID,
-				TokenID:  t,
-				Price:    0.5,
-				Side:     orders.BUY,
-				Size:     size,
+				Action:    runtime.OrderIntentActionPlace,
+				MarketID:  intent.MarketID,
+				TokenID:   t,
+				Price:     0.5,
+				Side:      orders.BUY,
+				OrderType: intent.OrderType,
+				Size:      size,
 			}
 			orderId := fmt.Sprintf("%d_%s", time.Now().UnixNano(), t)
 			orderTmps = append(orderTmps, orderId)
@@ -103,12 +104,13 @@ func (e *Executor) submitMerges(intents []runtime.OrderIntent) {
 		newIntents := make([]runtime.OrderIntent, 0, tlen)
 		for _, t := range intent.Tokens {
 			newIntent := runtime.OrderIntent{
-				Action:   runtime.OrderIntentActionPlace,
-				MarketID: intent.MarketID,
-				TokenID:  t,
-				Price:    0.5,
-				Side:     orders.SELL,
-				Size:     size,
+				Action:    runtime.OrderIntentActionPlace,
+				MarketID:  intent.MarketID,
+				TokenID:   t,
+				Price:     0.5,
+				Side:      orders.SELL,
+				OrderType: intent.OrderType,
+				Size:      size,
 			}
 			orderId := fmt.Sprintf("%d_%s", time.Now().UnixNano(), t)
 			orderTmps = append(orderTmps, orderId)

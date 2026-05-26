@@ -1248,7 +1248,7 @@ func TestSubmitPlacements_SingleSuccess(t *testing.T) {
 	bus := core.NewEventBus()
 	defer bus.Close()
 	ch := bus.Subscribe()
-	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv), OrderType: orders.GTC}
+	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv)}
 
 	exec.submitPlacements([]runtime.OrderIntent{{
 		IntentID: "i1", MarketID: "m", TokenID: "123456789",
@@ -1274,7 +1274,7 @@ func TestSubmitPlacements_SingleEmptyOrderID(t *testing.T) {
 	bus := core.NewEventBus()
 	defer bus.Close()
 	ch := bus.Subscribe()
-	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv), OrderType: orders.GTC}
+	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv)}
 
 	exec.submitPlacements([]runtime.OrderIntent{{
 		IntentID: "i-empty", MarketID: "m", TokenID: "123456789",
@@ -1300,7 +1300,7 @@ func TestSubmitPlacements_SingleErrorMsg(t *testing.T) {
 	bus := core.NewEventBus()
 	defer bus.Close()
 	ch := bus.Subscribe()
-	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv), OrderType: orders.GTC}
+	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv)}
 
 	exec.submitPlacements([]runtime.OrderIntent{{
 		IntentID: "i-err", MarketID: "m", TokenID: "123456789",
@@ -1327,7 +1327,7 @@ func TestSubmitPlacements_SinglePostError(t *testing.T) {
 	bus := core.NewEventBus()
 	defer bus.Close()
 	ch := bus.Subscribe()
-	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv), OrderType: orders.GTC}
+	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv)}
 
 	exec.submitPlacements([]runtime.OrderIntent{{
 		IntentID: "i-post-err", MarketID: "m", TokenID: "123456789",
@@ -1353,7 +1353,7 @@ func TestSubmitPlacements_BatchSuccess(t *testing.T) {
 	bus := core.NewEventBus()
 	defer bus.Close()
 	ch := bus.Subscribe()
-	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv), OrderType: orders.GTC}
+	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv)}
 
 	exec.submitPlacements([]runtime.OrderIntent{
 		{IntentID: "i1", MarketID: "m", TokenID: "111", Price: 0.5, Size: 1, Side: orders.BUY},
@@ -1379,7 +1379,7 @@ func TestSubmitPlacements_BatchPostError(t *testing.T) {
 	bus := core.NewEventBus()
 	defer bus.Close()
 	ch := bus.Subscribe()
-	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv), OrderType: orders.GTC}
+	exec := &Executor{Bus: bus, Client: makeGoodClient(t, srv)}
 
 	exec.submitPlacements([]runtime.OrderIntent{
 		{IntentID: "i1", MarketID: "m", TokenID: "111", Price: 0.5, Size: 1, Side: orders.BUY},

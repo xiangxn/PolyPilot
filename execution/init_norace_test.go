@@ -15,7 +15,6 @@ import (
 
 	"github.com/xiangxn/polypilot/core"
 
-	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
@@ -37,9 +36,6 @@ func TestInit_DefaultsApplied(t *testing.T) {
 
 	if exec.Bus != bus {
 		t.Fatal("expected Bus to be set")
-	}
-	if exec.OrderType != orders.GTC {
-		t.Fatalf("expected GTC default, got %v", exec.OrderType)
 	}
 	if exec.tracked == nil {
 		t.Fatal("expected tracked map initialized")
@@ -64,7 +60,7 @@ func TestInit_DefaultsApplied(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 }
 
-func TestInit_RespectsExistingOrderTypeAndQueueSize(t *testing.T) {
+func TestInit_RespectsExistingQueueSize(t *testing.T) {
 	bus := core.NewEventBus()
 	defer bus.Close()
 
@@ -75,7 +71,6 @@ func TestInit_RespectsExistingOrderTypeAndQueueSize(t *testing.T) {
 
 	exec := &Executor{
 		Config:             cfg,
-		OrderType:          orders.GTC,
 		ExecutionQueueSize: 64,
 		DryRun:             true,
 	}

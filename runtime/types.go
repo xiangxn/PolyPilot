@@ -145,10 +145,11 @@ type OrderIntent struct {
 	Action OrderIntentAction
 
 	// PLACE 必填
-	MarketID string
-	TokenID  string
-	Price    float64
-	Side     orders.Side
+	MarketID  string
+	TokenID   string
+	Price     float64
+	Side      orders.Side
+	OrderType orders.OrderType // PLACE 可选，默认 GTC
 
 	// SPLIT,MERGE时为amount
 	Size     float64

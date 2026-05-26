@@ -36,8 +36,9 @@ type trackedOrder struct {
 }
 
 type preparedPlacement struct {
-	intent runtime.OrderIntent
-	order  *orders.SignedOrder
+	intent    runtime.OrderIntent
+	order     *orders.SignedOrder
+	orderType orders.OrderType
 }
 
 type Executor struct {
@@ -46,7 +47,6 @@ type Executor struct {
 	Client       *sdk.PolymarketClient
 	TradeMonitor *sdk.TradeMonitor
 	Config       *sdk.Config
-	OrderType    orders.OrderType
 	DeferExec    bool
 	DryRun       bool // when true, all placements publish Accepted+Filled without hitting Polymarket
 
@@ -68,9 +68,6 @@ type Executor struct {
 
 func (e *Executor) Init(bus *core.EventBus, ctx context.Context) {
 	e.Bus = bus
-	if e.OrderType == "" {
-		e.OrderType = orders.GTC
-	}
 	if e.tracked == nil {
 		e.tracked = make(map[string]*trackedOrder)
 	}
@@ -332,7 +329,12 @@ func validatePlacement(in runtime.OrderIntent) error {
 	if in.Side != orders.BUY && in.Side != orders.SELL {
 		return fmt.Errorf("invalid order side")
 	}
-	return nil
+	switch in.OrderType {
+	case "", orders.GTC, orders.FOK, orders.GTD, orders.FAK:
+		return nil
+	default:
+		return fmt.Errorf("invalid order type")
+	}
 }
 
 func parseEventTime(ts int64) time.Time {

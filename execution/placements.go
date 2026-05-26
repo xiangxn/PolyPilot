@@ -20,6 +20,10 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	preparedOrders := make([]preparedPlacement, 0, len(intents))
 	signatureType := orders.POLY_GNOSIS_SAFE
 	for _, in := range intents {
+		orderType := in.OrderType
+		if orderType == "" {
+			orderType = orders.GTC
+		}
 		signedOrder, err := e.Client.CreateOrder(&orders.UserOrder{
 			TokenID: in.TokenID,
 			Price:   in.Price,
@@ -40,7 +44,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			})
 			continue
 		}
-		preparedOrders = append(preparedOrders, preparedPlacement{intent: in, order: signedOrder})
+		preparedOrders = append(preparedOrders, preparedPlacement{intent: in, order: signedOrder, orderType: orderType})
 	}
 
 	if len(preparedOrders) == 0 {
@@ -50,7 +54,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	if len(preparedOrders) > 1 {
 		args := make([]orders.PostOrdersArgs, 0, len(preparedOrders))
 		for _, po := range preparedOrders {
-			args = append(args, orders.PostOrdersArgs{Order: po.order, OrderType: e.OrderType})
+			args = append(args, orders.PostOrdersArgs{Order: po.order, OrderType: po.orderType})
 		}
 
 		startAt := time.Now().UnixMilli()
@@ -80,7 +84,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 
 	single := preparedOrders[0]
 	startAt := time.Now().UnixMilli()
-	result, err := e.Client.PostOrder(single.order, e.OrderType, e.DeferExec)
+	result, err := e.Client.PostOrder(single.order, single.orderType, e.DeferExec)
 	log.Debug().Int64("submit_start_ms", startAt).Int64("submit_end_ms", time.Now().UnixMilli()).Msg("post order finished")
 	if err != nil {
 		e.publish(core.ExecutionEvent{
