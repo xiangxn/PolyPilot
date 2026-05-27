@@ -33,48 +33,6 @@ func TestCopyMap(t *testing.T) {
 	}
 }
 
-func TestPhi(t *testing.T) {
-	if got := Phi(0); got < 0.49 || got > 0.51 {
-		t.Fatalf("Phi(0) ≈ 0.5, got %v", got)
-	}
-	if Phi(10) < 0.999 {
-		t.Fatal("Phi(10) ≈ 1")
-	}
-	if Phi(-10) > 0.001 {
-		t.Fatal("Phi(-10) ≈ 0")
-	}
-}
-
-func TestCopyOrderBook_Independence(t *testing.T) {
-	src := sdk.OrderBook{
-		Bids: []orders.Book{{Price: 0.5, Size: 10}},
-		Asks: []orders.Book{{Price: 0.6, Size: 5}},
-	}
-	cp := CopyOrderBook(src)
-	cp.Bids[0].Size = 99
-	if src.Bids[0].Size != 10 {
-		t.Fatal("CopyOrderBook didn't deep-copy bids")
-	}
-	cp.Asks[0].Size = 77
-	if src.Asks[0].Size != 5 {
-		t.Fatal("CopyOrderBook didn't deep-copy asks")
-	}
-}
-
-func TestCopyOrderBook_NilSlices(t *testing.T) {
-	src := sdk.OrderBook{AssetId: "tk1"} // nil bids/asks
-	cp := CopyOrderBook(src)
-	if cp.AssetId != "tk1" {
-		t.Fatalf("scalar field not copied: %+v", cp)
-	}
-	if cp.Bids != nil {
-		t.Fatalf("expected nil Bids, got %v", cp.Bids)
-	}
-	if cp.Asks != nil {
-		t.Fatalf("expected nil Asks, got %v", cp.Asks)
-	}
-}
-
 func TestNewEngine_StoresClient(t *testing.T) {
 	c := sdk.NewClient(sdk.DefaultConfig())
 	e := NewEngine("btc", c)
@@ -97,12 +55,7 @@ func TestInit_StartsTickerThatStopsOnCancel(t *testing.T) {
 	if e.signal.zscore == nil || e.signal.zWindows == nil {
 		t.Fatal("zscore/zWindows not initialized")
 	}
-	if e.token.items == nil {
-		t.Fatal("token.items not initialized")
-	}
-	if e.book.books == nil {
-		t.Fatal("book.books not initialized")
-	}
+
 	// Wait a moment to ensure goroutine exits cleanly
 	time.Sleep(50 * time.Millisecond)
 }
@@ -260,9 +213,9 @@ func TestOnUpdate_EventOrderBook_UpdatesTokenPrice(t *testing.T) {
 	e.market.openPrice = 100
 	e.market.endTime = time.Now().Add(time.Hour).UnixMilli()
 	e.market.tokenIDs = []string{"tk1"}
-	e.token.items = map[string]runtime.Token{
-		"tk1": {Id: "tk1", AskPrice: 0.4, BidPrice: 0.3},
-	}
+	e.tokens.Store("tk1", &runtime.Token{
+		Id: "tk1", AskPrice: 0.4, BidPrice: 0.3,
+	})
 
 	ev := core.Event{Type: core.EventOrderBook, Data: &sdk.OrderBook{
 		AssetId:   "tk1",
@@ -273,8 +226,10 @@ func TestOnUpdate_EventOrderBook_UpdatesTokenPrice(t *testing.T) {
 	}}
 	// zscore not ready yet → returns false but should update items
 	_, _ = e.OnUpdate(ev)
-	if e.token.items["tk1"].AskPrice != 0.6 || e.token.items["tk1"].BidPrice != 0.5 {
-		t.Fatalf("expected token prices updated, got %+v", e.token.items["tk1"])
+	v, _ := e.tokens.Load("tk1")
+	token := v.(*runtime.Token)
+	if token.AskPrice != 0.6 || token.BidPrice != 0.5 {
+		t.Fatalf("expected token prices updated, got %+v", token)
 	}
 }
 
@@ -301,9 +256,9 @@ func TestOnUpdate_EventOrderBook_ZScoreReady_ReturnsObservation(t *testing.T) {
 	e.market.openPrice = 100
 	e.market.endTime = time.Now().Add(time.Hour).UnixMilli()
 	e.market.tokenIDs = []string{"tk1"}
-	e.token.items = map[string]runtime.Token{
-		"tk1": {Id: "tk1"},
-	}
+	e.tokens.Store("tk1", &runtime.Token{
+		Id: "tk1",
+	})
 
 	ev := core.Event{Type: core.EventOrderBook, Data: &sdk.OrderBook{
 		AssetId:   "tk1",
@@ -472,9 +427,9 @@ func TestCurrentObservation_HappyPath(t *testing.T) {
 	e.market.endTime = time.Now().Add(time.Hour).UnixMilli()
 	e.market.openPrice = 100
 	e.market.tokenIDs = []string{"tk1"}
-	e.token.items = map[string]runtime.Token{
-		"tk1": {Id: "tk1", AskPrice: 0.6, BidPrice: 0.5},
-	}
+	e.tokens.Store("tk1", &runtime.Token{
+		Id: "tk1", AskPrice: 0.6, BidPrice: 0.5,
+	})
 
 	obs, ok := e.CurrentObservation()
 	if !ok {
@@ -528,10 +483,6 @@ func TestResetForNewMarketLocked_PopulatesState(t *testing.T) {
 		endTime:   time.Now().Add(time.Hour).UnixMilli(),
 		openPrice: 100,
 		tokenIDs:  []string{"tk1", "tk2"},
-		books: []sdk.OrderBookSummary{
-			{AssetId: "tk1", Asks: []orders.Book{{Price: 0.6, Size: 5}}, Bids: []orders.Book{{Price: 0.5, Size: 5}}},
-			{AssetId: "tk2", Asks: []orders.Book{{Price: 0.4, Size: 5}}, Bids: []orders.Book{{Price: 0.3, Size: 5}}},
-		},
 	}
 	obs, ok := e.resetForNewMarketLocked(raw, prep)
 	if !ok {
@@ -546,16 +497,13 @@ func TestResetForNewMarketLocked_PopulatesState(t *testing.T) {
 	if len(e.market.tokenIDs) != 2 {
 		t.Fatalf("tokenIDs=%v", e.market.tokenIDs)
 	}
-	if len(e.token.items) != 2 {
-		t.Fatalf("token items count=%d", len(e.token.items))
+
+	v, _ := e.tokens.Load("tk1")
+	token := v.(*runtime.Token)
+	if token.AskPrice != 0 {
+		t.Fatalf("token tk1 askPrice=%v", token.AskPrice)
 	}
-	if e.token.items["tk1"].AskPrice != 0.6 {
-		t.Fatalf("token tk1 askPrice=%v", e.token.items["tk1"].AskPrice)
-	}
-	// Order books should be stored
-	if ob := e.GetOrderBook("tk1"); ob == nil {
-		t.Fatal("expected order book for tk1")
-	}
+
 }
 
 func TestResetForNewMarketLocked_NilPrep(t *testing.T) {
@@ -578,9 +526,6 @@ func TestResetForNewMarketLocked_EmptyBidsAsks(t *testing.T) {
 		endTime:   time.Now().Add(time.Hour).UnixMilli(),
 		openPrice: 100,
 		tokenIDs:  []string{"tk1"},
-		books: []sdk.OrderBookSummary{
-			{AssetId: "tk1"}, // no bids/asks
-		},
 	}
 	obs, ok := e.resetForNewMarketLocked(raw, prep)
 	if !ok {
@@ -589,8 +534,10 @@ func TestResetForNewMarketLocked_EmptyBidsAsks(t *testing.T) {
 	if obs.MarketID != "c1" {
 		t.Fatalf("got %v", obs.MarketID)
 	}
-	if e.token.items["tk1"].AskPrice != 0 || e.token.items["tk1"].BidPrice != 0 {
-		t.Fatalf("expected zero prices, got %+v", e.token.items["tk1"])
+	v, _ := e.tokens.Load("tk1")
+	token := v.(*runtime.Token)
+	if token.AskPrice != 0 || token.BidPrice != 0 {
+		t.Fatalf("expected zero prices, got %+v", token)
 	}
 }
 

@@ -33,10 +33,12 @@ func TestRace_OnUpdateVsCurrentObservation(t *testing.T) {
 	e.market.endTime = time.Now().Add(time.Hour).UnixMilli()
 	e.market.openPrice = 100.0
 	e.market.tokenIDs = []string{"tk1", "tk2"}
-	e.token.items = map[string]runtime.Token{
-		"tk1": {Id: "tk1", AskPrice: 0.5, BidPrice: 0.49},
-		"tk2": {Id: "tk2", AskPrice: 0.5, BidPrice: 0.49},
-	}
+	e.tokens.Store("tk1", &runtime.Token{
+		Id: "tk1", AskPrice: 0.5, BidPrice: 0.49,
+	})
+	e.tokens.Store("tk2", &runtime.Token{
+		Id: "tk2", AskPrice: 0.5, BidPrice: 0.49,
+	})
 
 	var wg sync.WaitGroup
 	done := make(chan struct{})

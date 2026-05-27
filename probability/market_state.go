@@ -6,10 +6,8 @@ import (
 	"github.com/xiangxn/polypilot/runtime"
 
 	"github.com/tidwall/gjson"
-	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	"github.com/xiangxn/go-polymarket-sdk/utils"
-	pUtils "github.com/xiangxn/polypilot/utils"
 )
 
 // resetPrep holds RPC-derived data needed to reset market state.
@@ -17,7 +15,6 @@ type resetPrep struct {
 	endTime   int64
 	openPrice float64
 	tokenIDs  []string
-	books     []sdk.OrderBookSummary
 }
 
 // prepareReset performs all RPC calls outside the engine lock. Returns nil
@@ -35,18 +32,13 @@ func (e *Engine) prepareReset(obj gjson.Result) *resetPrep {
 	if client == nil {
 		client = sdk.NewClient(sdk.DefaultConfig())
 	}
-	books, err := client.GetOrderBooks([]sdk.BookParams{
-		{TokenId: tokenIDs[0]}, {TokenId: tokenIDs[1]},
-	})
-	if err != nil {
-		return nil
-	}
+
 	cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, e.Symbol)
 	openPrice := cpm.FetchOpenPrice(&obj)
 	if openPrice == 0 {
 		return nil
 	}
-	return &resetPrep{endTime: endTime, openPrice: openPrice, tokenIDs: tokenIDs, books: books}
+	return &resetPrep{endTime: endTime, openPrice: openPrice, tokenIDs: tokenIDs}
 }
 
 // resetForNewMarketLocked applies pre-fetched market data to the engine.
@@ -56,7 +48,6 @@ func (e *Engine) resetForNewMarketLocked(obj gjson.Result, prep *resetPrep) (run
 		return runtime.Observation{}, false
 	}
 	e.signal.latestZ.Store(0)
-	e.token.items = make(map[string]runtime.Token, 2)
 
 	e.market.endTime = prep.endTime
 	e.market.tokenIDs = prep.tokenIDs
@@ -64,35 +55,20 @@ func (e *Engine) resetForNewMarketLocked(obj gjson.Result, prep *resetPrep) (run
 	e.market.raw = &obj
 	e.generation.Add(1)
 
-	for _, o := range prep.books {
-		ap, bp := 0.0, 0.0
-		if len(o.Asks) > 0 {
-			ap = o.Asks[len(o.Asks)-1].Price
-		}
-		if len(o.Bids) > 0 {
-			bp = o.Bids[len(o.Bids)-1].Price
-		}
-		e.token.items[o.AssetId] = runtime.Token{Id: o.AssetId, AskPrice: ap, BidPrice: bp}
-		ob := o
-		e.updateOrderBook(o.AssetId, func(old *sdk.OrderBook) *sdk.OrderBook {
-			return &sdk.OrderBook{
-				AssetId:   ob.AssetId,
-				Market:    ob.Market,
-				Timestamp: ob.Timestamp,
-				Asks:      append([]orders.Book(nil), ob.Asks...),
-				Bids:      append([]orders.Book(nil), ob.Bids...),
-			}
-		})
-	}
-
 	if e.signal.zWindows != nil {
 		e.signal.zWindows.Reset()
 	}
 
+	tokens := make(map[string]runtime.Token)
+	for _, t := range prep.tokenIDs {
+		token := &runtime.Token{Id: t}
+		e.tokens.Store(t, token)
+		tokens[t] = *token
+	}
 	obs := runtime.Observation{
 		At:          time.Now().Unix(),
 		MarketID:    obj.Get("conditionId").String(),
-		Tokens:      pUtils.CopyMap(e.token.items),
+		Tokens:      tokens,
 		TokenIds:    append([]string(nil), prep.tokenIDs...),
 		TimeLeftSec: prep.endTime/1000 - time.Now().Unix(),
 	}
