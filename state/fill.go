@@ -30,6 +30,8 @@ func (s *State) ApplyFill(orderID, marketID, tokenID string, side orders.Side, f
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	log.Debug().Str("side", string(side)).Float64("size", filledSize).Float64("price", fillPrice).Str("orderID", orderID).Msg("ApplyFill")
+
 	res, exists := s.orderReservations[orderID]
 	if !exists {
 		return core.ErrReservationNotFound
