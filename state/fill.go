@@ -16,8 +16,7 @@ import (
 //
 // When the order's RemainingSize falls to <= core.FloatEpsilon, the reservation
 // is deleted.
-func (s *State) ApplyFill(orderID, marketID, tokenID string, side orders.Side,
-	filledSize, fillPrice float64) error {
+func (s *State) ApplyFill(orderID, marketID, tokenID string, side orders.Side, filledSize, fillPrice float64) error {
 	if orderID == "" {
 		return core.ErrReservationNotFound
 	}

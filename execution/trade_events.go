@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/xiangxn/polypilot/core"
@@ -43,6 +44,8 @@ func (e *Executor) handleTradeEvent(ev sdk.TradeEvent) {
 		}
 	case sdk.TradeEventTypeTrade:
 		if ev.Trade != nil {
+			msg, _ := ev.Raw.MarshalJSON()
+			log.Debug().Msg(fmt.Sprintf("onTradeEvent: %s", msg))
 			e.onTradeEvent(ev.Trade)
 		}
 	}
