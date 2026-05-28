@@ -280,9 +280,10 @@ func (e *Executor) buildFillEventsFromCumulative(orderID string, t *trackedOrder
 	if cumulative < 0 {
 		cumulative = 0
 	}
-	if t.RequestedSize > 0 && cumulative > t.RequestedSize {
-		cumulative = t.RequestedSize
-	}
+	// polymarket有会匹配会大于RequestedSize,所以这里不再扣除
+	// if t.RequestedSize > 0 && cumulative > t.RequestedSize {
+	// 	cumulative = t.RequestedSize
+	// }
 	delta := cumulative - t.FilledSize
 	if delta <= floatEpsilon {
 		return nil
