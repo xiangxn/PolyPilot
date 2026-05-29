@@ -24,7 +24,7 @@ func (e *Engine) GetOrderBook(tokenId string) *sdk.OrderBook {
 		return nil
 	}
 	if ob.Latency > 100 {
-		log.Warn().Str("market", ob.Market).Int64("timestamp", ob.Timestamp).Int64("latency", ob.Latency).Msg("orderbook latency")
+		log.Debug().Str("market", ob.Market).Int64("timestamp", ob.Timestamp).Int64("latency", ob.Latency).Msg("orderbook latency")
 		return nil
 	}
 	return ob

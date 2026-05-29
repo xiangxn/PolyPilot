@@ -183,7 +183,7 @@ func (e *Executor) Execute(intents []runtime.OrderIntent) {
 			validated = append(validated, in)
 		case runtime.OrderIntentActionSplit, runtime.OrderIntentActionMerge:
 			if in.Size <= 0 {
-				log.Warn().Str("Action", string(action)).Float64("Size", in.Size).Msg("skip split/merge intent: size <= 0")
+				log.Warn().Str("Action", string(action)).Float64("Size", in.Size).Msg("skip split/merge intent: size ≤ 0")
 				continue
 			}
 			tlen := len(in.Tokens)

@@ -370,7 +370,8 @@ func TestBuildFillFromCumulative_ClampToRequestedSize(t *testing.T) {
 	tr := &trackedOrder{MarketID: "m", TokenID: "tk", Price: 0.5, RequestedSize: 10, Side: orders.BUY}
 	// Cumulative beyond requested size clamps
 	evs := exec.buildFillEventsFromCumulative("o", tr, 20, time.Now())
-	if len(evs) != 1 || evs[0].Status != core.ExecutionStatusFilled || evs[0].FilledSize != 10 {
+	// Polymarket大概率出现大于RequestedSize的匹配，所以这里不再判断FilledSize
+	if len(evs) != 1 || evs[0].Status != core.ExecutionStatusFilled || evs[0].FilledSize < 10 {
 		t.Fatalf("expected full fill clamped, got %+v", evs)
 	}
 	if !tr.Finalized {

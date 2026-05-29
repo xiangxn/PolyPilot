@@ -42,9 +42,10 @@ func (s *State) ApplyFill(orderID, marketID, tokenID string, side orders.Side, f
 	if res.Side != side {
 		return core.ErrFillSideMismatch
 	}
-	if filledSize > res.RemainingSize+core.FloatEpsilon {
-		return core.ErrFillExceedsRemaining
-	}
+	// Polymarket中大概率出现超过请求Size的匹配，所以这里不再判断异常
+	// if filledSize > res.RemainingSize+core.FloatEpsilon {
+	// 	return core.ErrFillExceedsRemaining
+	// }
 	if fillPrice <= 0 {
 		fillPrice = res.Price
 	}

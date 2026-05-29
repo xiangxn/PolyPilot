@@ -71,14 +71,15 @@ func TestApplyFill_SideMismatch(t *testing.T) {
 	}
 }
 
-func TestApplyFill_OverFill(t *testing.T) {
-	s := newStateWithBalance(t, 100)
-	_ = s.ReserveOrder("o1", "m1", "tk1", orders.BUY, 0.5, 10)
-	err := s.ApplyFill("o1", "m1", "tk1", orders.BUY, 20, 0.5)
-	if !errors.Is(err, core.ErrFillExceedsRemaining) {
-		t.Fatalf("expected ErrFillExceedsRemaining, got %v", err)
-	}
-}
+// Polymarket大概率出现超过requestedSize的匹配，所以这里不再验证
+// func TestApplyFill_OverFill(t *testing.T) {
+// 	s := newStateWithBalance(t, 100)
+// 	_ = s.ReserveOrder("o1", "m1", "tk1", orders.BUY, 0.5, 10)
+// 	err := s.ApplyFill("o1", "m1", "tk1", orders.BUY, 20, 0.5)
+// 	if !errors.Is(err, core.ErrFillExceedsRemaining) {
+// 		t.Fatalf("expected ErrFillExceedsRemaining, got %v", err)
+// 	}
+// }
 
 func TestApplyFill_FillPriceFallbackToReservedPrice(t *testing.T) {
 	s := newStateWithBalance(t, 100)
