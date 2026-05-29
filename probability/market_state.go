@@ -114,5 +114,6 @@ func (e *Engine) resetForNewMarketLocked(obj gjson.Result, prep *resetPrep) (run
 		TokenIds:    append([]string(nil), prep.tokenIDs...),
 		TimeLeftSec: prep.endTime/1000 - time.Now().Unix(),
 	}
+	e.fillFeaturesLocked(&obs)
 	return obs, true
 }
