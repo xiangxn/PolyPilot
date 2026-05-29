@@ -136,6 +136,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 
 		// 更新Tokens
 		token := value.(*runtime.Token)
+		token.Latency = orderBook.Latency
 
 		if len(orderBook.Asks) > 0 {
 			ob := orderBook.Asks[len(orderBook.Asks)-1]

@@ -20,6 +20,7 @@ type Token struct {
 	AskSize  float64
 	BidPrice float64
 	BidSize  float64
+	Latency  int64
 }
 
 type Observation struct {
