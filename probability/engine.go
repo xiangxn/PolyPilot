@@ -10,15 +10,12 @@ import (
 	"github.com/xiangxn/polypilot/indicators"
 	"github.com/xiangxn/polypilot/internal/atomicx"
 	"github.com/xiangxn/polypilot/internal/buffer"
-	"github.com/xiangxn/polypilot/logx"
 	"github.com/xiangxn/polypilot/runtime"
 
 	"github.com/tidwall/gjson"
 
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
-
-var log = logx.Module("probability")
 
 // Engine 不可在多个独立 goroutine 中直接读写其字段。所有非 atomic
 // 字段（market.*、token.items）的并发访问由 mu 串行化：
@@ -122,27 +119,33 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			return runtime.Observation{}, false
 		}
 
-		// 更新orderbook
-		e.updateOrderBook(orderBook.AssetId, func(old *sdk.OrderBook) *sdk.OrderBook {
-			return orderBook
-		})
-
 		if e.market.raw == nil || e.market.openPrice == 0 || e.market.endTime == 0 {
 			return runtime.Observation{}, false
 		}
 
-		// 更新Tokens
+		// 仅处理当前市场 token，避免历史 market 的 orderbook 残留
 		value, ok := e.tokens.Load(orderBook.AssetId)
 		if !ok {
 			return runtime.Observation{}, false
 		}
+
+		// 更新 orderbook
+		e.updateOrderBook(orderBook.AssetId, func(old *sdk.OrderBook) *sdk.OrderBook {
+			return orderBook
+		})
+
+		// 更新Tokens
 		token := value.(*runtime.Token)
 
 		if len(orderBook.Asks) > 0 {
-			token.AskPrice = orderBook.Asks[len(orderBook.Asks)-1].Price
+			ob := orderBook.Asks[len(orderBook.Asks)-1]
+			token.AskPrice = ob.Price
+			token.AskSize = ob.Size
 		}
 		if len(orderBook.Bids) > 0 {
-			token.BidPrice = orderBook.Bids[len(orderBook.Bids)-1].Price
+			ob := orderBook.Bids[len(orderBook.Bids)-1]
+			token.BidPrice = ob.Price
+			token.BidSize = ob.Size
 		}
 
 		tokens := make(map[string]runtime.Token)

@@ -17,7 +17,9 @@ import (
 type Token struct {
 	Id       string
 	AskPrice float64
+	AskSize  float64
 	BidPrice float64
+	BidSize  float64
 }
 
 type Observation struct {

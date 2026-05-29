@@ -36,9 +36,45 @@ func (e *Engine) prepareReset(obj gjson.Result) *resetPrep {
 	cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, e.Symbol)
 	openPrice := cpm.FetchOpenPrice(&obj)
 	if openPrice == 0 {
+		for _, backoff := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
+			time.Sleep(backoff)
+			openPrice = cpm.FetchOpenPrice(&obj)
+			if openPrice > 0 {
+				break
+			}
+		}
+	}
+	if openPrice == 0 {
+		log.Warn().Msg("FetchOpenPrice fail")
 		return nil
 	}
 	return &resetPrep{endTime: endTime, openPrice: openPrice, tokenIDs: tokenIDs}
+}
+
+func (e *Engine) cleanupStoresExceptLocked(keep map[string]struct{}) {
+	e.tokens.Range(func(key, _ any) bool {
+		tokenID, ok := key.(string)
+		if !ok {
+			e.tokens.Delete(key)
+			return true
+		}
+		if _, exists := keep[tokenID]; !exists {
+			e.tokens.Delete(tokenID)
+		}
+		return true
+	})
+
+	e.books.Range(func(key, _ any) bool {
+		tokenID, ok := key.(string)
+		if !ok {
+			e.books.Delete(key)
+			return true
+		}
+		if _, exists := keep[tokenID]; !exists {
+			e.books.Delete(tokenID)
+		}
+		return true
+	})
 }
 
 // resetForNewMarketLocked applies pre-fetched market data to the engine.
@@ -58,6 +94,12 @@ func (e *Engine) resetForNewMarketLocked(obj gjson.Result, prep *resetPrep) (run
 	if e.signal.zWindows != nil {
 		e.signal.zWindows.Reset()
 	}
+
+	keep := make(map[string]struct{}, len(prep.tokenIDs))
+	for _, t := range prep.tokenIDs {
+		keep[t] = struct{}{}
+	}
+	e.cleanupStoresExceptLocked(keep)
 
 	tokens := make(map[string]runtime.Token)
 	for _, t := range prep.tokenIDs {

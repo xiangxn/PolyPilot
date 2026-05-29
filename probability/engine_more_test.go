@@ -200,6 +200,9 @@ func TestOnUpdate_EventOrderBook_UnknownToken_NoOp(t *testing.T) {
 	if _, ok := e.OnUpdate(ev); ok {
 		t.Fatal("expected !ok for unknown token")
 	}
+	if _, exists := e.books.Load("tk-unknown"); exists {
+		t.Fatal("unknown token orderbook should not be stored")
+	}
 }
 
 func TestOnUpdate_EventOrderBook_UpdatesTokenPrice(t *testing.T) {
@@ -504,6 +507,41 @@ func TestResetForNewMarketLocked_PopulatesState(t *testing.T) {
 		t.Fatalf("token tk1 askPrice=%v", token.AskPrice)
 	}
 
+}
+
+func TestResetForNewMarketLocked_CleansStaleTokensAndBooks(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := &Engine{}
+	e.Init(ctx)
+
+	e.tokens.Store("tk-old", &runtime.Token{Id: "tk-old"})
+	e.updateOrderBook("tk-old", func(old *sdk.OrderBook) *sdk.OrderBook {
+		return &sdk.OrderBook{AssetId: "tk-old", Timestamp: time.Now().UnixMilli()}
+	})
+
+	raw := gjson.Parse(`{"conditionId":"c2","endDate":"2099-01-01T00:00:00Z"}`)
+	prep := &resetPrep{
+		endTime:   time.Now().Add(time.Hour).UnixMilli(),
+		openPrice: 100,
+		tokenIDs:  []string{"tk-new-1", "tk-new-2"},
+	}
+	if _, ok := e.resetForNewMarketLocked(raw, prep); !ok {
+		t.Fatal("expected ok")
+	}
+
+	if _, exists := e.tokens.Load("tk-old"); exists {
+		t.Fatal("stale token should be cleaned")
+	}
+	if _, exists := e.books.Load("tk-old"); exists {
+		t.Fatal("stale book should be cleaned")
+	}
+	if _, exists := e.tokens.Load("tk-new-1"); !exists {
+		t.Fatal("new token should exist")
+	}
+	if _, exists := e.tokens.Load("tk-new-2"); !exists {
+		t.Fatal("new token should exist")
+	}
 }
 
 func TestResetForNewMarketLocked_NilPrep(t *testing.T) {
