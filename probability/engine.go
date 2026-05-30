@@ -2,6 +2,7 @@ package probability
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -20,12 +21,15 @@ import (
 type Engine struct {
 	Symbol string
 	market *utils.SafeState[marketState]
-	signal *utils.SafeState[signalState]
+	signal signalState
 	// tokenId -> runtime.Token
 	tokens sync.Map
 	// tokenId -> sdk.BookStore
 	books  sync.Map
 	client *sdk.PolymarketClient
+
+	zscore   *indicators.ZScore
+	zWindows *buffer.RingBuffer
 }
 
 type marketState struct {
@@ -35,11 +39,15 @@ type marketState struct {
 	tokenIDs  []string
 }
 
+func (m marketState) Clone() marketState {
+	n := m
+	n.tokenIDs = slices.Clone(m.tokenIDs)
+	return n
+}
+
 type signalState struct {
 	latestPrice atomicx.Float64
-	zscore      *indicators.ZScore
 	latestZ     atomicx.Float64
-	zWindows    *buffer.RingBuffer
 	latestProb  atomicx.Float64
 }
 
@@ -48,11 +56,10 @@ type signalState struct {
 // to sdk.NewClient(sdk.DefaultConfig()) at first use — useful for tests.
 func NewEngine(symbol string, client *sdk.PolymarketClient) *Engine {
 	return &Engine{Symbol: symbol, client: client,
-		market: utils.NewSafeState(marketState{}),
-		signal: utils.NewSafeState(signalState{
-			zscore:   indicators.NewZScore(60),
-			zWindows: buffer.NewRingBuffer(60),
-		}),
+		market:   utils.NewSafeState(marketState{}),
+		signal:   signalState{},
+		zscore:   indicators.NewZScore(60),
+		zWindows: buffer.NewRingBuffer(60),
 	}
 }
 
@@ -66,12 +73,8 @@ func (e *Engine) Init(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				var signal signalState
-				e.signal.Read(func(v signalState) {
-					signal = v
-				})
-				z := signal.latestZ.Load()
-				signal.zWindows.Add(z)
+				z := e.signal.latestZ.Load()
+				e.zWindows.Add(z)
 			}
 		}
 	}()
@@ -88,10 +91,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		}
 		conditionID := obj.Get("conditionId").String()
 
-		var market marketState
-		e.market.Read(func(v marketState) {
-			market = v
-		})
+		market := utils.Clone(e.market)
 
 		if market.marketId != conditionID {
 			market.marketId = conditionID
@@ -148,28 +148,19 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			return runtime.Observation{}, false
 		}
 
-		var signal signalState
-		e.signal.Read(func(v signalState) {
-			signal = v
-		})
-
-		signal.latestPrice.Store(data.Price)
-		signal.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
-		if signal.zscore.IsReady() {
+		e.signal.latestPrice.Store(data.Price)
+		e.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
+		if e.zscore.IsReady() {
 			timeLeft := market.endTime/1000 - time.Now().Unix()
 			if timeLeft >= 1 {
-				z := signal.zscore.ZScore(data.Price, market.openPrice, float64(timeLeft))
-				signal.latestZ.Store(z)
+				z := e.zscore.ZScore(data.Price, market.openPrice, float64(timeLeft))
+				e.signal.latestZ.Store(z)
 			}
 		}
 	case core.EventProbability:
 		prop, ok := ev.Data.(float64)
 		if ok {
-			var signal signalState
-			e.signal.Read(func(v signalState) {
-				signal = v
-			})
-			signal.latestProb.Store(prop)
+			e.signal.latestProb.Store(prop)
 		}
 	}
 	return runtime.Observation{}, false
@@ -177,26 +168,19 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 
 func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 
-	var market marketState
-	e.market.Read(func(v marketState) {
-		market = v
-	})
+	market := utils.Clone(e.market)
 
 	if market.endTime == 0 || market.openPrice == 0 {
 		return runtime.Observation{}, false
 	}
 
-	var signal signalState
-	e.signal.Read(func(v signalState) {
-		signal = v
-	})
 	obs := runtime.Observation{
 		At:          time.Now().Unix(),
 		MarketID:    market.marketId,
 		TimeLeftSec: market.endTime/1000 - time.Now().Unix(),
-		Probability: signal.latestProb.Load(),
+		Probability: e.signal.latestProb.Load(),
 		Tokens:      e.getTokens(market.tokenIDs),
-		TokenIds:    make([]string, len(market.tokenIDs)),
+		TokenIds:    market.tokenIDs,
 		GetOrderBook: func(tID string) *sdk.OrderBook {
 			return e.GetOrderBook(tID)
 		},
@@ -204,11 +188,8 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 			return e.fetchPrices(obj)
 		},
 	}
-	if len(market.tokenIDs) > 0 {
-		copy(obs.TokenIds, market.tokenIDs)
-	}
 
-	e.fillFeaturesLocked(&obs, &market, &signal)
+	e.fillFeaturesLocked(&obs, &market)
 
 	return obs, true
 }

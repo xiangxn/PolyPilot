@@ -88,18 +88,13 @@ func (e *Engine) resetForNewMarketLocked(market *marketState, prep *resetPrep) b
 		return false
 	}
 
-	var signal signalState
-	e.signal.Read(func(v signalState) {
-		signal = v
-	})
-
-	signal.latestZ.Store(0)
+	e.signal.latestZ.Store(0)
 
 	market.endTime = prep.endTime
 	market.tokenIDs = prep.tokenIDs
 	market.openPrice = prep.openPrice
 
-	signal.zWindows.Reset()
+	e.zWindows.Reset()
 
 	keep := make(map[string]struct{}, len(prep.tokenIDs))
 	for _, t := range prep.tokenIDs {
