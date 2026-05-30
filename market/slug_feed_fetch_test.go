@@ -47,7 +47,7 @@ func buildFeedWithFakeClient(t *testing.T, status int, body string) (*Polymarket
 	srv, client := newFakeGammaServer(t, status, body)
 	// We must provide a non-nil MarketMonitor so f.MarketMonitor.GetClient()
 	// returns our fake-wired client.
-	mm := sdk.NewMarketMonitor("ws://localhost:0", false, client)
+	mm := sdk.NewMarketMonitor("ws://localhost:0", false, client, false)
 	f := &PolymarketSlugFeed{
 		MarketMonitor: mm,
 	}
@@ -157,7 +157,7 @@ func TestPolymarketSlugFeed_Start_FetchError_CtxCancel(t *testing.T) {
 	bus := newSyncBus(t)
 	srv, client := newFakeGammaServer(t, 404, `{}`)
 	defer srv.Close()
-	mm := sdk.NewMarketMonitor("ws://127.0.0.1:1", false, client)
+	mm := sdk.NewMarketMonitor("ws://127.0.0.1:1", false, client, false)
 	f := &PolymarketSlugFeed{
 		Bus:           bus.bus,
 		MarketMonitor: mm,
@@ -240,7 +240,7 @@ func TestFetchMarketBySlug_HappyPath_FeesEnabled(t *testing.T) {
 	cfg.Polymarket.GammaBaseURL = srv.URL
 	cfg.Polymarket.ClobBaseURL = srv.URL
 	client := sdk.NewClient(cfg)
-	mm := sdk.NewMarketMonitor("ws://localhost:0", false, client)
+	mm := sdk.NewMarketMonitor("ws://localhost:0", false, client, false)
 	f := &PolymarketSlugFeed{MarketMonitor: mm}
 	f.ensureDefaults()
 

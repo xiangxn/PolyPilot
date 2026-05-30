@@ -58,7 +58,7 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 			cfg = sdk.DefaultConfig()
 		}
 		client := sdk.NewClient(cfg)
-		f.MarketMonitor = sdk.NewMarketMonitor(cfg.Polymarket.ClobWSBaseURL, false, client)
+		f.MarketMonitor = sdk.NewMarketMonitor(cfg.Polymarket.ClobWSBaseURL, false, client, true)
 	}
 
 	obChan := f.MarketMonitor.Subscribe()
