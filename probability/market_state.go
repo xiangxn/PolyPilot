@@ -28,17 +28,12 @@ func (e *Engine) prepareReset(obj gjson.Result) *resetPrep {
 	if err != nil {
 		endTime = 0
 	}
-	client := e.client
-	if client == nil {
-		client = sdk.NewClient(sdk.DefaultConfig())
-	}
 
-	cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, e.Symbol)
-	openPrice := cpm.FetchOpenPrice(&obj)
+	openPrice, _ := e.fetchPrices(&obj)
 	if openPrice == 0 {
 		for _, backoff := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
 			time.Sleep(backoff)
-			openPrice = cpm.FetchOpenPrice(&obj)
+			openPrice, _ = e.fetchPrices(&obj)
 			if openPrice > 0 {
 				break
 			}
@@ -49,6 +44,15 @@ func (e *Engine) prepareReset(obj gjson.Result) *resetPrep {
 		return nil
 	}
 	return &resetPrep{endTime: endTime, openPrice: openPrice, tokenIDs: tokenIDs}
+}
+
+func (e *Engine) fetchPrices(obj *gjson.Result) (float64, float64) {
+	client := e.client
+	if client == nil {
+		client = sdk.NewClient(sdk.DefaultConfig())
+	}
+	cpm := sdk.NewCryptoPriceMonitor(client, sdk.MonitorChainlink, e.Symbol)
+	return cpm.FetchOpenPrice(obj)
 }
 
 func (e *Engine) cleanupStoresExceptLocked(keep map[string]struct{}) {

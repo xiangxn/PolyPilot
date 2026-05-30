@@ -166,6 +166,9 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		obs.GetOrderBook = func(tID string) *sdk.OrderBook {
 			return e.GetOrderBook(tID)
 		}
+		obs.FetchPrices = func(obj *gjson.Result) (float64, float64) {
+			return e.fetchPrices(obj)
+		}
 		e.fillFeaturesLocked(&obs)
 		return obs, true
 	case core.EventExternalPrice:
@@ -223,6 +226,9 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 		TokenIds:    make([]string, len(e.market.tokenIDs)),
 		GetOrderBook: func(tID string) *sdk.OrderBook {
 			return e.GetOrderBook(tID)
+		},
+		FetchPrices: func(obj *gjson.Result) (float64, float64) {
+			return e.fetchPrices(obj)
 		},
 	}
 	if len(e.market.tokenIDs) > 0 {

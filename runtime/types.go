@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tidwall/gjson"
 	"github.com/xiangxn/polypilot/core"
 	"github.com/xiangxn/polypilot/state"
 
@@ -37,6 +38,7 @@ type Observation struct {
 	Features map[string]any
 
 	GetOrderBook func(tokenId string) *sdk.OrderBook
+	FetchPrices  func(obj *gjson.Result) (float64, float64)
 }
 
 type Feed interface {
