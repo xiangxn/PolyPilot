@@ -19,8 +19,8 @@ type resetPrep struct {
 
 // prepareReset performs all RPC calls outside the engine lock. Returns nil
 // if the market is invalid or RPC fails (caller should leave state unchanged).
-func (e *Engine) prepareReset(obj gjson.Result) *resetPrep {
-	tokenIDs := utils.GetStringArray(&obj, "clobTokenIds")
+func (e *Engine) prepareReset(obj *gjson.Result) *resetPrep {
+	tokenIDs := utils.GetStringArray(obj, "clobTokenIds")
 	if len(tokenIDs) < 2 {
 		return nil
 	}
@@ -29,11 +29,11 @@ func (e *Engine) prepareReset(obj gjson.Result) *resetPrep {
 		endTime = 0
 	}
 
-	openPrice, _ := e.fetchPrices(&obj)
+	openPrice, _ := e.fetchPrices(obj)
 	if openPrice == 0 {
-		for _, backoff := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
+		for _, backoff := range []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 60 * time.Second} {
 			time.Sleep(backoff)
-			openPrice, _ = e.fetchPrices(&obj)
+			openPrice, _ = e.fetchPrices(obj)
 			if openPrice > 0 {
 				break
 			}

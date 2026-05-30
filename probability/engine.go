@@ -96,7 +96,7 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		if market.marketId != conditionID {
 			market.marketId = conditionID
 
-			prep := e.prepareReset(obj) // RPC outside lock
+			prep := e.prepareReset(&obj) // RPC outside lock
 			if prep == nil {
 				return runtime.Observation{}, false
 			}
