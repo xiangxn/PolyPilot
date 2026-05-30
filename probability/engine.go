@@ -3,7 +3,6 @@ package probability
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/xiangxn/polypilot/core"
@@ -11,35 +10,26 @@ import (
 	"github.com/xiangxn/polypilot/internal/atomicx"
 	"github.com/xiangxn/polypilot/internal/buffer"
 	"github.com/xiangxn/polypilot/runtime"
+	"github.com/xiangxn/polypilot/utils"
 
 	"github.com/tidwall/gjson"
 
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
-// Engine 不可在多个独立 goroutine 中直接读写其字段。所有非 atomic
-// 字段（market.*、token.items）的并发访问由 mu 串行化：
-//   - 写路径：OnUpdate 的 EventMarket / EventOrderBook 分支（Lock）
-//   - 读路径：CurrentObservation、EventSignal 分支（RLock）
-//
-// book.* 与 signal.zscore / signal.zWindows 各自持有内部锁，
-// signal.latestPrice / signal.latestZ 使用 atomicx.Float64，
-// 这些字段不受 mu 保护。
 type Engine struct {
 	Symbol string
-	mu     sync.RWMutex
-	market marketState
-	signal signalState
-	// tokenId -> *runtime.Token
+	market *utils.SafeState[marketState]
+	signal *utils.SafeState[signalState]
+	// tokenId -> runtime.Token
 	tokens sync.Map
-	// tokenId -> *sdk.BookStore
-	books      sync.Map
-	client     *sdk.PolymarketClient
-	generation atomic.Uint64
+	// tokenId -> sdk.BookStore
+	books  sync.Map
+	client *sdk.PolymarketClient
 }
 
 type marketState struct {
-	raw       *gjson.Result
+	marketId  string
 	openPrice float64
 	endTime   int64
 	tokenIDs  []string
@@ -57,13 +47,16 @@ type signalState struct {
 // SDK client for RPC calls (order books, open price). Passing nil falls back
 // to sdk.NewClient(sdk.DefaultConfig()) at first use — useful for tests.
 func NewEngine(symbol string, client *sdk.PolymarketClient) *Engine {
-	return &Engine{Symbol: symbol, client: client}
+	return &Engine{Symbol: symbol, client: client,
+		market: utils.NewSafeState(marketState{}),
+		signal: utils.NewSafeState(signalState{
+			zscore:   indicators.NewZScore(60),
+			zWindows: buffer.NewRingBuffer(60),
+		}),
+	}
 }
 
 func (e *Engine) Init(ctx context.Context) {
-	e.signal.zscore = indicators.NewZScore(60)
-	e.signal.zWindows = buffer.NewRingBuffer(e.signal.zscore.WindowSize())
-
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -73,10 +66,12 @@ func (e *Engine) Init(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if e.signal.zWindows != nil {
-					z := e.signal.latestZ.Load()
-					e.signal.zWindows.Add(z)
-				}
+				var signal signalState
+				e.signal.Read(func(v signalState) {
+					signal = v
+				})
+				z := signal.latestZ.Load()
+				signal.zWindows.Add(z)
 			}
 		}
 	}()
@@ -86,33 +81,33 @@ func (e *Engine) Init(ctx context.Context) {
 func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 	switch ev.Type {
 	case core.EventMarket:
+		// 如果有新的市场开始就更新当前市场信息
 		obj, ok := ev.Data.(gjson.Result)
 		if !ok {
 			return runtime.Observation{}, false
 		}
 		conditionID := obj.Get("conditionId").String()
 
-		e.mu.RLock()
-		needReset := e.market.raw == nil || conditionID != e.market.raw.Get("conditionId").String() || e.market.openPrice == 0
-		gen := e.generation.Load()
-		e.mu.RUnlock()
+		var market marketState
+		e.market.Read(func(v marketState) {
+			market = v
+		})
 
-		if !needReset {
-			return runtime.Observation{}, false
+		if market.marketId != conditionID {
+			market.marketId = conditionID
+
+			prep := e.prepareReset(obj) // RPC outside lock
+			if prep == nil {
+				return runtime.Observation{}, false
+			}
+
+			if e.resetForNewMarketLocked(&market, prep) {
+				e.market.Replace(market)
+				return e.CurrentObservation()
+			}
 		}
 
-		prep := e.prepareReset(obj) // RPC outside lock
-		if prep == nil {
-			return runtime.Observation{}, false
-		}
-
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		if e.generation.Load() != gen {
-			// another reset happened while we were doing RPC; skip
-			return runtime.Observation{}, false
-		}
-		return e.resetForNewMarketLocked(obj, prep)
+		return runtime.Observation{}, false
 
 	case core.EventOrderBook:
 		orderBook, ok := ev.Data.(*sdk.OrderBook)
@@ -120,13 +115,12 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			return runtime.Observation{}, false
 		}
 
-		if e.market.raw == nil || e.market.openPrice == 0 || e.market.endTime == 0 {
-			return runtime.Observation{}, false
-		}
+		var market marketState
+		e.market.Read(func(v marketState) {
+			market = v
+		})
 
-		// 仅处理当前市场 token，避免历史 market 的 orderbook 残留
-		value, ok := e.tokens.Load(orderBook.AssetId)
-		if !ok {
+		if market.openPrice == 0 || market.endTime == 0 {
 			return runtime.Observation{}, false
 		}
 
@@ -136,94 +130,73 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 		})
 
 		// 更新Tokens
-		token := value.(*runtime.Token)
-		token.Latency = orderBook.Latency
+		e.updateToken(orderBook)
 
-		if len(orderBook.Asks) > 0 {
-			ob := orderBook.Asks[len(orderBook.Asks)-1]
-			token.AskPrice = ob.Price
-			token.AskSize = ob.Size
-		}
-		if len(orderBook.Bids) > 0 {
-			ob := orderBook.Bids[len(orderBook.Bids)-1]
-			token.BidPrice = ob.Price
-			token.BidSize = ob.Size
-		}
-
-		tokens := make(map[string]runtime.Token)
-		for _, t := range e.market.tokenIDs {
-			v, _ := e.tokens.Load(t)
-			tokens[t] = *v.(*runtime.Token)
-		}
-		var obs runtime.Observation
-		obs.At = orderBook.Timestamp
-		obs.MarketID = orderBook.Market
-		obs.TimeLeftSec = e.market.endTime/1000 - time.Now().Unix()
-		obs.Probability = e.signal.latestProb.Load()
-		obs.Tokens = tokens
-		obs.TokenIds = make([]string, len(e.market.tokenIDs))
-		copy(obs.TokenIds, e.market.tokenIDs)
-		obs.GetOrderBook = func(tID string) *sdk.OrderBook {
-			return e.GetOrderBook(tID)
-		}
-		obs.FetchPrices = func(obj *gjson.Result) (float64, float64) {
-			return e.fetchPrices(obj)
-		}
-		e.fillFeaturesLocked(&obs)
-		return obs, true
+		return e.CurrentObservation()
 	case core.EventExternalPrice:
 		data, ok := ev.Data.(sdk.ExternalPrice)
 		if !ok {
 			return runtime.Observation{}, false
 		}
 
-		e.mu.RLock()
-		openPrice := e.market.openPrice
-		endTime := e.market.endTime
-		e.mu.RUnlock()
+		var market marketState
+		e.market.Read(func(v marketState) {
+			market = v
+		})
 
-		if openPrice == 0 {
+		if market.openPrice == 0 || market.endTime == 0 {
 			return runtime.Observation{}, false
 		}
 
-		e.signal.latestPrice.Store(data.Price)
-		e.signal.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
-		if e.signal.zscore.IsReady() {
-			timeLeft := endTime/1000 - time.Now().Unix()
+		var signal signalState
+		e.signal.Read(func(v signalState) {
+			signal = v
+		})
+
+		signal.latestPrice.Store(data.Price)
+		signal.zscore.OnTick(indicators.Tick{Price: data.Price, Timestamp: data.Timestamp})
+		if signal.zscore.IsReady() {
+			timeLeft := market.endTime/1000 - time.Now().Unix()
 			if timeLeft >= 1 {
-				z := e.signal.zscore.ZScore(data.Price, openPrice, float64(timeLeft))
-				e.signal.latestZ.Store(z)
+				z := signal.zscore.ZScore(data.Price, market.openPrice, float64(timeLeft))
+				signal.latestZ.Store(z)
 			}
 		}
 	case core.EventProbability:
 		prop, ok := ev.Data.(float64)
 		if ok {
-			e.signal.latestProb.Store(prop)
+			var signal signalState
+			e.signal.Read(func(v signalState) {
+				signal = v
+			})
+			signal.latestProb.Store(prop)
 		}
 	}
 	return runtime.Observation{}, false
 }
 
 func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
 
-	if e.market.raw == nil || e.market.endTime == 0 {
+	var market marketState
+	e.market.Read(func(v marketState) {
+		market = v
+	})
+
+	if market.endTime == 0 || market.openPrice == 0 {
 		return runtime.Observation{}, false
 	}
 
-	tokens := make(map[string]runtime.Token)
-	for _, t := range e.market.tokenIDs {
-		v, _ := e.tokens.Load(t)
-		tokens[t] = *v.(*runtime.Token)
-	}
+	var signal signalState
+	e.signal.Read(func(v signalState) {
+		signal = v
+	})
 	obs := runtime.Observation{
 		At:          time.Now().Unix(),
-		MarketID:    e.market.raw.Get("conditionId").String(),
-		TimeLeftSec: e.market.endTime/1000 - time.Now().Unix(),
-		Probability: e.signal.latestProb.Load(),
-		Tokens:      tokens,
-		TokenIds:    make([]string, len(e.market.tokenIDs)),
+		MarketID:    market.marketId,
+		TimeLeftSec: market.endTime/1000 - time.Now().Unix(),
+		Probability: signal.latestProb.Load(),
+		Tokens:      e.getTokens(market.tokenIDs),
+		TokenIds:    make([]string, len(market.tokenIDs)),
 		GetOrderBook: func(tID string) *sdk.OrderBook {
 			return e.GetOrderBook(tID)
 		},
@@ -231,11 +204,11 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 			return e.fetchPrices(obj)
 		},
 	}
-	if len(e.market.tokenIDs) > 0 {
-		copy(obs.TokenIds, e.market.tokenIDs)
+	if len(market.tokenIDs) > 0 {
+		copy(obs.TokenIds, market.tokenIDs)
 	}
 
-	e.fillFeaturesLocked(&obs)
+	e.fillFeaturesLocked(&obs, &market, &signal)
 
 	return obs, true
 }

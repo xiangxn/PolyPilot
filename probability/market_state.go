@@ -83,21 +83,23 @@ func (e *Engine) cleanupStoresExceptLocked(keep map[string]struct{}) {
 
 // resetForNewMarketLocked applies pre-fetched market data to the engine.
 // Caller MUST hold e.mu.Lock(). RPC calls happen in prepareReset, not here.
-func (e *Engine) resetForNewMarketLocked(obj gjson.Result, prep *resetPrep) (runtime.Observation, bool) {
-	if prep == nil {
-		return runtime.Observation{}, false
+func (e *Engine) resetForNewMarketLocked(market *marketState, prep *resetPrep) bool {
+	if prep == nil || market == nil {
+		return false
 	}
-	e.signal.latestZ.Store(0)
 
-	e.market.endTime = prep.endTime
-	e.market.tokenIDs = prep.tokenIDs
-	e.market.openPrice = prep.openPrice
-	e.market.raw = &obj
-	e.generation.Add(1)
+	var signal signalState
+	e.signal.Read(func(v signalState) {
+		signal = v
+	})
 
-	if e.signal.zWindows != nil {
-		e.signal.zWindows.Reset()
-	}
+	signal.latestZ.Store(0)
+
+	market.endTime = prep.endTime
+	market.tokenIDs = prep.tokenIDs
+	market.openPrice = prep.openPrice
+
+	signal.zWindows.Reset()
 
 	keep := make(map[string]struct{}, len(prep.tokenIDs))
 	for _, t := range prep.tokenIDs {
@@ -105,19 +107,9 @@ func (e *Engine) resetForNewMarketLocked(obj gjson.Result, prep *resetPrep) (run
 	}
 	e.cleanupStoresExceptLocked(keep)
 
-	tokens := make(map[string]runtime.Token)
 	for _, t := range prep.tokenIDs {
-		token := &runtime.Token{Id: t}
+		token := runtime.Token{Id: t}
 		e.tokens.Store(t, token)
-		tokens[t] = *token
 	}
-	obs := runtime.Observation{
-		At:          time.Now().Unix(),
-		MarketID:    obj.Get("conditionId").String(),
-		Tokens:      tokens,
-		TokenIds:    append([]string(nil), prep.tokenIDs...),
-		TimeLeftSec: prep.endTime/1000 - time.Now().Unix(),
-	}
-	e.fillFeaturesLocked(&obs)
-	return obs, true
+	return true
 }

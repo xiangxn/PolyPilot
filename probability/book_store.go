@@ -14,8 +14,8 @@ func (e *Engine) GetOrderBook(tokenId string) *sdk.OrderBook {
 		return nil
 	}
 
-	store, ok := v.(*sdk.BookStore)
-	if !ok || store == nil {
+	store, ok := v.(sdk.BookStore)
+	if !ok {
 		return nil
 	}
 	// check stale
@@ -31,8 +31,8 @@ func (e *Engine) GetOrderBook(tokenId string) *sdk.OrderBook {
 }
 
 func (e *Engine) updateOrderBook(tokenId string, fn func(old *sdk.OrderBook) *sdk.OrderBook) {
-	v, _ := e.books.LoadOrStore(tokenId, &sdk.BookStore{})
-	store := v.(*sdk.BookStore)
+	v, _ := e.books.LoadOrStore(tokenId, sdk.BookStore{})
+	store := v.(sdk.BookStore)
 
 	old := store.Load()
 	newOB := fn(old)
@@ -42,4 +42,5 @@ func (e *Engine) updateOrderBook(tokenId string, fn func(old *sdk.OrderBook) *sd
 		}
 	}
 	store.Store(newOB)
+	e.books.Store(tokenId, store)
 }

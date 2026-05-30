@@ -1,4 +1,4 @@
-package strategy
+package utils
 
 import "sync"
 
