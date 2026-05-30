@@ -62,6 +62,7 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 	}
 
 	obChan := f.MarketMonitor.Subscribe()
+	mrChan := f.MarketMonitor.SubscribeResolved()
 
 	go f.MarketMonitor.Run(ctx)
 
@@ -117,6 +118,11 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 					f.Bus.Publish(core.Event{
 						Type: core.EventOrderBook,
 						Data: orderBook,
+					})
+				case resolvedInfo := <-mrChan:
+					f.Bus.Publish(core.Event{
+						Type: core.EventMarketResolved,
+						Data: resolvedInfo,
 					})
 				case <-timer.C:
 					timer.Stop()

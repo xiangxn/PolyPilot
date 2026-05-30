@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 	"github.com/xiangxn/polypilot/core"
 )
 
@@ -112,6 +113,16 @@ func (e *Engine) Start(ctx context.Context) {
 
 					e.handleExecutionEvent(data, true)
 					e.handleExecutionAwareStrategy(data)
+				case core.EventMarketResolved:
+					info, ok := ev.Data.(*sdk.ResolvedInfo)
+					if ok {
+						for _, s := range e.Strategies {
+							strategy, ok := s.(MarketResolved)
+							if ok {
+								strategy.OnResolved(info)
+							}
+						}
+					}
 				}
 			case now := <-strategyTickC:
 				e.handleStrategyTick(now)

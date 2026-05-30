@@ -6,18 +6,20 @@ const (
 )
 
 const (
-	// 创建、更新、结束、结算
+	// 创建、更新、结束
 	EventMarket EventType = "MARKET"
+	// 结算
+	EventMarketResolved EventType = "MARKET_RESOLVED"
 	// 订单薄更新
-	EventOrderBook EventType = "ORDERBOOK"
+	EventOrderBook     EventType = "ORDERBOOK"
 	EventExternalPrice EventType = "EXTERNAL_PRICE"
 	EventProbability   EventType = "PROBABILITY"
-	EventOrder     EventType = "ORDER"
-	EventExecution EventType = "EXECUTION"
-	EventRisk      EventType = "RISK"
-	EventStrategy  EventType = "STRATEGY"
-	EventSystem    EventType = "SYSTEM"
-	EventMetrics   EventType = "METRICS"
+	EventOrder         EventType = "ORDER"
+	EventExecution     EventType = "EXECUTION"
+	EventRisk          EventType = "RISK"
+	EventStrategy      EventType = "STRATEGY"
+	EventSystem        EventType = "SYSTEM"
+	EventMetrics       EventType = "METRICS"
 	// 仓位临近到期预警
 	EventPositionExpiring EventType = "POSITION_EXPIRING"
 	EventReconcile        EventType = "RECONCILE"

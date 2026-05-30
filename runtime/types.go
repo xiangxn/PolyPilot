@@ -67,6 +67,13 @@ type Strategy interface {
 }
 
 /*
+市场结算接口，用于策略处理结算逻辑
+*/
+type MarketResolved interface {
+	OnResolved(info *sdk.ResolvedInfo)
+}
+
+/*
 使用时注意：需要在策略中缓存state自己来处理下单去重的问题。
 这是独立于数据事件的一个ticker驱动
 */
