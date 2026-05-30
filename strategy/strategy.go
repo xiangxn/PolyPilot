@@ -132,7 +132,7 @@ func (s *Strategy) OnUpdate(e core.Event, o runtime.Observation, stateSnap state
 			return nil
 		}
 
-		sm, err := market.ParseSlugMarket(obj)
+		sm, err := market.ParseSlugMarket(&obj)
 		if err == nil {
 			s.markets.Add(o.MarketID, sm)
 		}
