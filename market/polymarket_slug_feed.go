@@ -214,8 +214,8 @@ func (f *PolymarketSlugFeed) ensureDefaults() {
 
 // ParseSlugMarket constructs a SlugMarket from a raw market JSON gjson.Result.
 // Returns an error if essential fields are missing.
-func ParseSlugMarket(result gjson.Result) (SlugMarket, error) {
-	tokenIDs := utils.GetStringArray(&result, "clobTokenIds")
+func ParseSlugMarket(result *gjson.Result) (SlugMarket, error) {
+	tokenIDs := utils.GetStringArray(result, "clobTokenIds")
 	if len(tokenIDs) == 0 {
 		return SlugMarket{}, fmt.Errorf("no clobTokenIds")
 	}
@@ -224,13 +224,13 @@ func ParseSlugMarket(result gjson.Result) (SlugMarket, error) {
 	return SlugMarket{
 		MarketID:         result.Get("conditionId").String(),
 		TokenIDs:         tokenIDs,
-		Prices:           utils.GetFloatArray(&result, "outcomePrices"),
+		Prices:           utils.GetFloatArray(result, "outcomePrices"),
 		EndDate:          endDate,
 		ResolutionSource: result.Get("resolutionSource").String(),
 		TickSize:         result.Get("orderPriceMinTickSize").Float(),
 		NegRisk:          result.Get("negRisk").Bool(),
 		StartDate:        startDate,
 		Closed:           result.Get("closed").Bool(),
-		Outcomes:         utils.GetStringArray(&result, "outcomes"),
+		Outcomes:         utils.GetStringArray(result, "outcomes"),
 	}, nil
 }
