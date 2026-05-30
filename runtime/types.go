@@ -51,6 +51,7 @@ type Observer interface {
 
 type Probability interface {
 	Init(ctx context.Context)
+	// 只有EventMarket，EventOrderBook事件会向下传递
 	OnUpdate(ev core.Event) (Observation, bool)
 }
 

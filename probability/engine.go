@@ -82,6 +82,7 @@ func (e *Engine) Init(ctx context.Context) {
 	}()
 }
 
+// 只有EventMarket，EventOrderBook事件会向下传递
 func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 	switch ev.Type {
 	case core.EventMarket:
