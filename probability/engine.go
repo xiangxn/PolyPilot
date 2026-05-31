@@ -34,6 +34,7 @@ type Engine struct {
 
 type marketState struct {
 	marketId  string
+	slug      string
 	openPrice float64
 	endTime   int64
 	tokenIDs  []string
@@ -90,11 +91,13 @@ func (e *Engine) OnUpdate(ev core.Event) (runtime.Observation, bool) {
 			return runtime.Observation{}, false
 		}
 		conditionID := obj.Get("conditionId").String()
+		slug := obj.Get("slug").String()
 
 		market := utils.Clone(e.market)
 
 		if market.marketId != conditionID {
 			market.marketId = conditionID
+			market.slug = slug
 
 			prep := e.prepareReset(&obj) // RPC outside lock
 			if prep == nil {
@@ -176,6 +179,7 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 
 	obs := runtime.Observation{
 		At:          time.Now().Unix(),
+		Slug:        market.slug,
 		MarketID:    market.marketId,
 		TimeLeftSec: market.endTime/1000 - time.Now().Unix(),
 		Probability: e.signal.latestProb.Load(),
@@ -186,6 +190,9 @@ func (e *Engine) CurrentObservation() (runtime.Observation, bool) {
 		},
 		FetchPrices: func(obj *gjson.Result) (float64, float64) {
 			return e.fetchPrices(obj)
+		},
+		CheckResolved: func(slug string) (int, bool) {
+			return e.checkResolved(slug)
 		},
 	}
 

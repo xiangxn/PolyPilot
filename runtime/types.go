@@ -27,6 +27,7 @@ type Token struct {
 type Observation struct {
 	At       int64
 	MarketID string
+	Slug     string
 	// tokenId -> Token
 	Tokens      map[string]Token
 	TokenIds    []string
@@ -37,8 +38,9 @@ type Observation struct {
 	// 可扩展特征（按命名空间 key）
 	Features map[string]any
 
-	GetOrderBook func(tokenId string) *sdk.OrderBook
-	FetchPrices  func(obj *gjson.Result) (float64, float64)
+	GetOrderBook  func(tokenId string) *sdk.OrderBook
+	FetchPrices   func(obj *gjson.Result) (float64, float64)
+	CheckResolved func(slug string) (int, bool)
 }
 
 type Feed interface {

@@ -55,6 +55,29 @@ func (e *Engine) fetchPrices(obj *gjson.Result) (float64, float64) {
 	return cpm.FetchOpenPrice(obj)
 }
 
+func (e *Engine) checkResolved(slug string) (int, bool) {
+	client := e.client
+	if client == nil {
+		client = sdk.NewClient(sdk.DefaultConfig())
+	}
+	obj, err := client.FetchMarketBySlug(slug)
+	if err != nil {
+		log.Warn().Str("slug", slug).Msg(err.Error())
+		return -1, false
+	}
+	closed := obj.Get("closed").Bool()
+	outcomePrices := utils.GetStringArray(obj, "outcomePrices")
+	umaResolutionStatus := obj.Get("umaResolutionStatus").String()
+	if closed && umaResolutionStatus == "resolved" {
+		for i, o := range outcomePrices {
+			if o == "1" {
+				return i, true
+			}
+		}
+	}
+	return -1, false
+}
+
 func (e *Engine) cleanupStoresExceptLocked(keep map[string]struct{}) {
 	e.tokens.Range(func(key, _ any) bool {
 		tokenID, ok := key.(string)
