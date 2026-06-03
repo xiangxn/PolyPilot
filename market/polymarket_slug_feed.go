@@ -58,10 +58,10 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 			cfg = sdk.DefaultConfig()
 		}
 		client := sdk.NewClient(cfg)
-		f.MarketMonitor = sdk.NewMarketMonitor(cfg.Polymarket.ClobWSBaseURL, false, client, true)
+		f.MarketMonitor = sdk.NewMarketMonitor(cfg.Polymarket.ClobWSBaseURL, false, client, false)
 	}
 
-	obChan := f.MarketMonitor.Subscribe()
+	obChan := f.MarketMonitor.SubscribeOrderBook()
 	mrChan := f.MarketMonitor.SubscribeResolved()
 
 	go f.MarketMonitor.Run(ctx)
@@ -126,7 +126,7 @@ func (f *PolymarketSlugFeed) Start(ctx context.Context) {
 					})
 				case <-timer.C:
 					timer.Stop()
-					f.MarketMonitor.Reset()
+					f.MarketMonitor.Reset(false)
 					break inner
 				}
 			}
