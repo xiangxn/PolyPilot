@@ -12,16 +12,17 @@ import (
 )
 
 type LoggingConfig struct {
-	Level            string `mapstructure:"level"`
-	Dir              string `mapstructure:"dir"`
-	Filename         string `mapstructure:"filename"`
-	MaxSizeMB        int64  `mapstructure:"max_size_mb"`
-	MaxBackups       int    `mapstructure:"max_backups"`
-	LocalTime        bool   `mapstructure:"local_time"`
-	TimeFormat       string `mapstructure:"time_format"`
-	AsyncChannelSize uint   `mapstructure:"async_channel_size"`
-	DiscardOnFull    bool   `mapstructure:"discard_on_full"`
-	EnableCaller     bool   `mapstructure:"enable_caller"`
+	Level            string            `mapstructure:"level"`
+	Dir              string            `mapstructure:"dir"`
+	Filename         string            `mapstructure:"filename"`
+	MaxSizeMB        int64             `mapstructure:"max_size_mb"`
+	MaxBackups       int               `mapstructure:"max_backups"`
+	LocalTime        bool              `mapstructure:"local_time"`
+	TimeFormat       string            `mapstructure:"time_format"`
+	AsyncChannelSize uint              `mapstructure:"async_channel_size"`
+	DiscardOnFull    bool              `mapstructure:"discard_on_full"`
+	EnableCaller     bool              `mapstructure:"enable_caller"`
+	ModuleFiles      map[string]string `mapstructure:"module_files"`
 }
 
 func DefaultConfig() LoggingConfig {
@@ -36,11 +37,13 @@ func DefaultConfig() LoggingConfig {
 		AsyncChannelSize: 16384,
 		DiscardOnFull:    false,
 		EnableCaller:     false,
+		ModuleFiles:      nil,
 	}
 }
 
 type moduleLogger struct {
 	name string
+	log  phuslog.Logger
 }
 
 type safeAsyncWriter struct {
@@ -48,12 +51,56 @@ type safeAsyncWriter struct {
 	closed atomic.Bool
 }
 
+// moduleWriter tracks a per-module file writer for rotation and cleanup.
+type moduleWriter struct {
+	fileWriter *phuslog.FileWriter
+	async      *safeAsyncWriter
+	logger     phuslog.Logger
+}
+
 var (
 	defaultLogger phuslog.Logger
-	fileWriter    *phuslog.FileWriter
+	defaultWriter *phuslog.FileWriter
 	closer        *safeAsyncWriter
 	moduleCache   sync.Map
+
+	// per-module writers, for daily rotation and shutdown
+	moduleWriters   = make(map[string]*moduleWriter)
+	moduleWritersMu sync.Mutex
+	moduleFilesCfg  map[string]string
+
+	// cached init options for creating per-module writers on demand
+	initOpts LoggingConfig
+	inited   bool
 )
+
+// buildLogger creates a FileWriter + AsyncWriter + Logger trio from the given
+// directory, filename, and shared options.
+func buildLogger(dir, filename string, opt LoggingConfig) (*phuslog.FileWriter, *safeAsyncWriter, phuslog.Logger) {
+	level := parseLevel(opt.Level)
+	caller := boolToInt(opt.EnableCaller)
+
+	fw := &phuslog.FileWriter{
+		Filename:     filepath.Join(dir, filename),
+		MaxSize:      opt.MaxSizeMB * 1024 * 1024,
+		MaxBackups:   opt.MaxBackups,
+		LocalTime:    opt.LocalTime,
+		TimeFormat:   opt.TimeFormat,
+		EnsureFolder: true,
+	}
+	aw := &phuslog.AsyncWriter{
+		Writer:        fw,
+		ChannelSize:   opt.AsyncChannelSize,
+		DiscardOnFull: opt.DiscardOnFull,
+	}
+	safeWriter := &safeAsyncWriter{inner: aw}
+	logger := phuslog.Logger{
+		Level:  level,
+		Caller: caller,
+		Writer: safeWriter,
+	}
+	return fw, safeWriter, logger
+}
 
 func Init(opt LoggingConfig) error {
 	if strings.TrimSpace(opt.Level) == "" {
@@ -75,29 +122,31 @@ func Init(opt LoggingConfig) error {
 		opt.AsyncChannelSize = 16384
 	}
 
-	fw := &phuslog.FileWriter{
-		Filename:     filepath.Join(opt.Dir, opt.Filename),
-		MaxSize:      opt.MaxSizeMB * 1024 * 1024,
-		MaxBackups:   opt.MaxBackups,
-		LocalTime:    opt.LocalTime,
-		TimeFormat:   opt.TimeFormat,
-		EnsureFolder: true,
-	}
-	aw := &phuslog.AsyncWriter{
-		Writer:        fw,
-		ChannelSize:   opt.AsyncChannelSize,
-		DiscardOnFull: opt.DiscardOnFull,
-	}
+	fw, safeWriter, logger := buildLogger(opt.Dir, opt.Filename, opt)
 
-	safeWriter := &safeAsyncWriter{inner: aw}
-	defaultLogger = phuslog.Logger{
-		Level:  parseLevel(opt.Level),
-		Caller: boolToInt(opt.EnableCaller),
-		Writer: safeWriter,
-	}
-	fileWriter = fw
+	defaultLogger = logger
+	defaultWriter = fw
 	closer = safeWriter
 	moduleCache = sync.Map{}
+
+	// store config for creating per-module writers on demand
+	initOpts = opt
+	moduleFilesCfg = opt.ModuleFiles
+	inited = true
+
+	// upgrade any module loggers that were cached before Init (e.g. package-level
+	// var declarations) and now have a dedicated file configured
+	if len(opt.ModuleFiles) > 0 {
+		moduleCache.Range(func(k, v any) bool {
+			name := k.(string)
+			if filename, ok := opt.ModuleFiles[name]; ok {
+				ml := v.(*moduleLogger)
+				ml.log = getOrCreateModuleLogger(name, filename)
+			}
+			return true
+		})
+	}
+
 	return nil
 }
 
@@ -113,6 +162,12 @@ func Bootstrap(ctx context.Context, opt LoggingConfig, loc *time.Location) (shut
 }
 
 func Close() error {
+	moduleWritersMu.Lock()
+	for _, mw := range moduleWriters {
+		_ = mw.async.Close()
+	}
+	moduleWritersMu.Unlock()
+
 	if closer != nil {
 		return closer.Close()
 	}
@@ -141,10 +196,24 @@ func (w *safeAsyncWriter) Close() error {
 	return w.inner.Close()
 }
 
-func StartDailyRotate(ctx context.Context, loc *time.Location) {
-	if fileWriter == nil {
-		return
+// getOrCreateModuleLogger returns a logger that writes to a module-specific file.
+// Caller must hold moduleWritersMu (or be in a single-writer context like Init).
+func getOrCreateModuleLogger(name, filename string) phuslog.Logger {
+	if mw, ok := moduleWriters[name]; ok {
+		return mw.logger
 	}
+
+	fw, safeWriter, logger := buildLogger(initOpts.Dir, filename, initOpts)
+
+	moduleWriters[name] = &moduleWriter{
+		fileWriter: fw,
+		async:      safeWriter,
+		logger:     logger,
+	}
+	return logger
+}
+
+func StartDailyRotate(ctx context.Context, loc *time.Location) {
 	if loc == nil {
 		loc = time.Local
 	}
@@ -158,7 +227,14 @@ func StartDailyRotate(ctx context.Context, loc *time.Location) {
 				t.Stop()
 				return
 			case <-t.C:
-				_ = fileWriter.Rotate()
+				if defaultWriter != nil {
+					_ = defaultWriter.Rotate()
+				}
+				moduleWritersMu.Lock()
+				for _, mw := range moduleWriters {
+					_ = mw.fileWriter.Rotate()
+				}
+				moduleWritersMu.Unlock()
 			}
 		}
 	}()
@@ -172,7 +248,17 @@ func Module(name string) *moduleLogger {
 	if v, ok := moduleCache.Load(key); ok {
 		return v.(*moduleLogger)
 	}
-	m := &moduleLogger{name: key}
+
+	log := defaultLogger
+	if inited {
+		if filename, ok := moduleFilesCfg[key]; ok {
+			moduleWritersMu.Lock()
+			log = getOrCreateModuleLogger(key, filename)
+			moduleWritersMu.Unlock()
+		}
+	}
+
+	m := &moduleLogger{name: key, log: log}
 	actual, _ := moduleCache.LoadOrStore(key, m)
 	return actual.(*moduleLogger)
 }
@@ -183,11 +269,11 @@ func Info() *phuslog.Entry  { return defaultLogger.Info() }
 func Warn() *phuslog.Entry  { return defaultLogger.Warn() }
 func Error() *phuslog.Entry { return defaultLogger.Error() }
 
-func (m *moduleLogger) Trace() *phuslog.Entry { return defaultLogger.Trace().Str("module", m.name) }
-func (m *moduleLogger) Debug() *phuslog.Entry { return defaultLogger.Debug().Str("module", m.name) }
-func (m *moduleLogger) Info() *phuslog.Entry  { return defaultLogger.Info().Str("module", m.name) }
-func (m *moduleLogger) Warn() *phuslog.Entry  { return defaultLogger.Warn().Str("module", m.name) }
-func (m *moduleLogger) Error() *phuslog.Entry { return defaultLogger.Error().Str("module", m.name) }
+func (m *moduleLogger) Trace() *phuslog.Entry { return m.log.Trace().Str("module", m.name) }
+func (m *moduleLogger) Debug() *phuslog.Entry { return m.log.Debug().Str("module", m.name) }
+func (m *moduleLogger) Info() *phuslog.Entry  { return m.log.Info().Str("module", m.name) }
+func (m *moduleLogger) Warn() *phuslog.Entry  { return m.log.Warn().Str("module", m.name) }
+func (m *moduleLogger) Error() *phuslog.Entry { return m.log.Error().Str("module", m.name) }
 
 func parseLevel(level string) phuslog.Level {
 	switch strings.ToLower(strings.TrimSpace(level)) {
