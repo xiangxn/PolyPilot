@@ -71,7 +71,7 @@ var (
 
 	// cached init options for creating per-module writers on demand
 	initOpts LoggingConfig
-	inited   bool
+	inited   atomic.Bool
 )
 
 // buildLogger creates a FileWriter + AsyncWriter + Logger trio from the given
@@ -127,31 +127,28 @@ func Init(opt LoggingConfig) error {
 	defaultLogger = logger
 	defaultWriter = fw
 	closer = safeWriter
-	moduleCache = sync.Map{}
 
 	// store config for creating per-module writers on demand
 	initOpts = opt
 	moduleFilesCfg = opt.ModuleFiles
-	inited = true
+	inited.Store(true)
 
 	// upgrade any module loggers that were cached before Init (e.g. package-level
 	// var declarations) and now have a dedicated file configured
-	if len(opt.ModuleFiles) > 0 {
-		moduleCache.Range(func(k, v any) bool {
-			name := k.(string)
-			ml := v.(*moduleLogger)
+	moduleCache.Range(func(k, v any) bool {
+		name := k.(string)
+		ml := v.(*moduleLogger)
 
-			if filename, ok := opt.ModuleFiles[name]; ok {
-				moduleWritersMu.Lock()
-				ml.log = getOrCreateModuleLogger(name, filename)
-				moduleWritersMu.Unlock()
-			} else {
-				ml.log = defaultLogger
-			}
+		if filename, ok := opt.ModuleFiles[name]; ok {
+			moduleWritersMu.Lock()
+			ml.log = getOrCreateModuleLogger(name, filename)
+			moduleWritersMu.Unlock()
+		} else {
+			ml.log = defaultLogger
+		}
 
-			return true
-		})
-	}
+		return true
+	})
 
 	return nil
 }
@@ -256,7 +253,7 @@ func Module(name string) *moduleLogger {
 	}
 
 	log := defaultLogger
-	if inited {
+	if inited.Load() {
 		if filename, ok := moduleFilesCfg[key]; ok {
 			moduleWritersMu.Lock()
 			log = getOrCreateModuleLogger(key, filename)

@@ -257,7 +257,7 @@ func TestInit_DefaultValuesApplied(t *testing.T) {
 	if closer == nil {
 		t.Fatal("expected non-nil closer")
 	}
-	if !inited {
+	if !inited.Load() {
 		t.Error("expected inited=true")
 	}
 	if initOpts.MaxSizeMB != 256 {
@@ -864,7 +864,7 @@ func TestIntegration_DefaultAndModuleFiles(t *testing.T) {
 		Dir:      dir,
 		Filename: "default.log",
 		ModuleFiles: map[string]string{
-			"trade":    "trade.jsonl",
+			"trade":    "trade.log",
 			"risk":     "risk.log",
 			"strategy": "strategy.log",
 		},
@@ -969,5 +969,5 @@ func resetState() {
 	moduleWritersMu.Unlock()
 	moduleFilesCfg = nil
 	initOpts = LoggingConfig{}
-	inited = false
+	inited.Store(false)
 }
