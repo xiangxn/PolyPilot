@@ -139,10 +139,16 @@ func Init(opt LoggingConfig) error {
 	if len(opt.ModuleFiles) > 0 {
 		moduleCache.Range(func(k, v any) bool {
 			name := k.(string)
+			ml := v.(*moduleLogger)
+
 			if filename, ok := opt.ModuleFiles[name]; ok {
-				ml := v.(*moduleLogger)
+				moduleWritersMu.Lock()
 				ml.log = getOrCreateModuleLogger(name, filename)
+				moduleWritersMu.Unlock()
+			} else {
+				ml.log = defaultLogger
 			}
+
 			return true
 		})
 	}
