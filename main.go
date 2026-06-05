@@ -21,6 +21,7 @@ import (
 	"github.com/xiangxn/polypilot/strategy"
 
 	"github.com/joho/godotenv"
+	"github.com/xiangxn/go-polymarket-sdk/orders"
 	sdk "github.com/xiangxn/go-polymarket-sdk/polymarket"
 )
 
@@ -62,9 +63,10 @@ func main() {
 			MarketCooldown:       cfg.Risk.MarketCooldown,
 		},
 		Exec: &execution.Executor{
-			Client:    sharedClient,
-			Config:    &cfg.SDKConfig,
-			Reconcile: st.TriggerReconcile,
+			Client:        sharedClient,
+			Config:        &cfg.SDKConfig,
+			Reconcile:     st.TriggerReconcile,
+			SignatureType: orders.POLY_GNOSIS_SAFE,
 		},
 		Feeds: []runtime.Feed{
 			&market.PolymarketSlugFeed{

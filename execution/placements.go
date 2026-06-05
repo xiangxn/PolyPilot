@@ -18,7 +18,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	}
 
 	preparedOrders := make([]preparedPlacement, 0, len(intents))
-	signatureType := orders.POLY_GNOSIS_SAFE
+	signatureType := e.SignatureType
 	for _, in := range intents {
 		orderType := in.OrderType
 		if orderType == "" {

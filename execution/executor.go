@@ -44,11 +44,12 @@ type preparedPlacement struct {
 type Executor struct {
 	Bus *core.EventBus
 
-	Client       *sdk.PolymarketClient
-	TradeMonitor *sdk.TradeMonitor
-	Config       *sdk.Config
-	DeferExec    bool
-	DryRun       bool // when true, all placements publish Accepted+Filled without hitting Polymarket
+	Client        *sdk.PolymarketClient
+	TradeMonitor  *sdk.TradeMonitor
+	Config        *sdk.Config
+	DeferExec     bool
+	DryRun        bool // when true, all placements publish Accepted+Filled without hitting Polymarket
+	SignatureType orders.SignatureType
 
 	// Reconcile is invoked when the executor sees a trade event for an
 	// orderID it doesn't track (i.e., a manually-placed external order on
