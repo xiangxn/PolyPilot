@@ -10,7 +10,7 @@ require (
 	github.com/phuslu/log v1.0.124
 	github.com/spf13/viper v1.20.1
 	github.com/tidwall/gjson v1.18.0
-	github.com/xiangxn/go-polymarket-sdk v0.6.17
+	github.com/xiangxn/go-polymarket-sdk v0.6.18
 	golang.org/x/term v0.38.0
 )
 

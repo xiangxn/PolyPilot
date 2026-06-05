@@ -18,7 +18,6 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 	}
 
 	preparedOrders := make([]preparedPlacement, 0, len(intents))
-	signatureType := e.SignatureType
 	for _, in := range intents {
 		orderType := in.OrderType
 		if orderType == "" {
@@ -29,7 +28,7 @@ func (e *Executor) submitPlacements(intents []runtime.OrderIntent) {
 			Price:   in.Price,
 			Size:    in.Size,
 			Side:    in.Side,
-		}, orders.CreateOrderOptions{SignatureType: &signatureType})
+		}, orders.CreateOrderOptions{})
 		if err != nil {
 			e.publish(core.ExecutionEvent{
 				ParentOrderID: in.IntentID,
