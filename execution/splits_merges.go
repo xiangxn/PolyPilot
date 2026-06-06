@@ -38,7 +38,7 @@ func (e *Executor) submitSplits(intents []runtime.OrderIntent) {
 			e.trackPostedOrder(orderId, newIntent)
 			e.publishAcceptedFromPost(newIntent, orderId, time.Now())
 		}
-		result, err := e.relayClient.SplitTokens(intent.MarketID, strconv.FormatFloat(size, 'f', constants.CollateralTokenDecimals, 64), false)
+		result, err := e.relayClient.SplitTokens(intent.MarketID, strconv.FormatFloat(size, 'f', int(constants.CollateralTokenDecimals), 64), false)
 		if err != nil {
 			log.Error().AnErr("err", err).Msg("split token failed")
 			for i, o := range orderTmps {
@@ -118,7 +118,7 @@ func (e *Executor) submitMerges(intents []runtime.OrderIntent) {
 			e.trackPostedOrder(orderId, newIntent)
 			e.publishAcceptedFromPost(newIntent, orderId, time.Now())
 		}
-		result, err := e.relayClient.MergeTokens(intent.MarketID, strconv.FormatFloat(size, 'f', constants.CollateralTokenDecimals, 64), false)
+		result, err := e.relayClient.MergeTokens(intent.MarketID, strconv.FormatFloat(size, 'f', int(constants.CollateralTokenDecimals), 64), false)
 		if err != nil {
 			log.Error().AnErr("err", err).Msg("merge token failed")
 			for i, o := range orderTmps {
